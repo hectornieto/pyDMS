@@ -1346,4 +1346,3 @@ class RandomForestRegressorWithLinearLeafRegression(ensemble.RandomForestRegress
 
             return y
 
-
