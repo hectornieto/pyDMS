@@ -1067,7 +1067,6 @@ class RandomForestSharpener(DecisionTreeSharpener):
         else:
             reg = \
                 ensemble.RandomForestRegressor(**self.regressorOpt)
-        # reg = ensemble.RandomForestRegressor(**self.regressorOpt)
 
         reg = reg.fit(data_HR, np.ravel(data_LR), sample_weight=weight)
 
@@ -1214,5 +1213,4 @@ class RandomForestRegressorWithLinearLeafRegression(ensemble.RandomForestRegress
 
 
             return y
-
 
