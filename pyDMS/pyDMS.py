@@ -1074,3 +1074,153 @@ class NeuralNetworkSharpener(DecisionTreeSharpener):
         outData = outData.reshape((origShape[0], origShape[1]))
 
         return outData
+
+
+class RandomForestSharpener(DecisionTreeSharpener):
+    ''' Random Forest based sharpening (disaggregation) of low-resolution
+    images using high-resolution images. The implementation is mostly based on [Gao2012] as
+    implemented in DescisionTreeSharpener except that Decision Tree regressor is replaced by
+    Neural Network regressor.
+
+    Nerual network based regressor is trained with high-resolution data resampled to
+    low resolution and low-resolution data and then applied
+    directly to high-resolution data to obtain high-resolution representation
+    of the low-resolution data.
+
+    The implementation includes selecting training data based on homogeneity
+    statistics and using the homogeneity as weight factor ([Gao2012], section 2.2),
+    performing linear regression with samples located within each regression
+    tree leaf node ([Gao2012], section 2.1), using an ensemble of regression trees
+    ([Gao2012], section 2.1), performing local (moving window) and global regression and
+    combining them based on residuals ([Gao2012] section 2.3) and performing residual
+    analysis and bias correction ([Gao2012], section 2.4)
+
+    Parameters
+    ----------
+    highResFiles: list of strings
+        A list of file paths to high-resolution images to be used during the
+        training of the sharpener.
+
+    lowResFiles: list of strings
+        A list of file paths to low-resolution images to be used during the
+        training of the sharpener. There must be one low-resolution image
+        for each high-resolution image.
+
+    lowResQualityFiles: list of strings (optional, default: [])
+        A list of file paths to low-resolution quality images to be used to
+        mask out low-quality low-resolution pixels during training. If provided
+        there must be one quality image for each low-resolution image.
+
+    lowResGoodQualityFlags: list of integers (optional, default: [])
+        A list of values indicating which pixel values in the low-resolution
+        quality images should be considered as good quality.
+
+    cvHomogeneityThreshold: float (optional, default: 0.25)
+        A threshold of coeficient of variation below which high-resolution
+        pixels resampled to low-resolution are considered homogeneous and
+        usable during the training of the disaggregator.
+
+    movingWindowSize: integer (optional, default: 0)
+        The size of local regression moving window in low-resolution pixels. If
+        set to 0 then only global regression is performed.
+
+    disaggregatingTemperature: boolean (optional, default: False)
+        Flag indicating whether the parameter to be disaggregated is
+        temperature (e.g. land surface temperature). If that is the case then
+        at some points it needs to be converted into radiance. This is becasue
+        sensors measure energy, not temperature, plus radiance is the physical
+        measurements it makes sense to average, while radiometric temperature
+        behaviour is not linear.
+
+    regressionType: int (optional, default: 0)
+        Flag indicating whether scikit-neuralnetwork (flag value = REG_sknn_ann = 0)
+        or scikit-learn (flag value = REG_sklearn_ann = 1) implementations of
+        nearual network should be used. See
+        https://github.com/aigamedev/scikit-neuralnetwork and
+        http://scikit-learn.org/stable/modules/generated/sklearn.neural_network.MLPRegressor.html
+        for details.
+
+    regressorOpt: dictionary (optional, default: {})
+        Options to pass to neural network regressor constructor See links in
+        regressionType parameter description for details.
+
+    baggingRegressorOpt: dictionary (optional, default: {})
+        Options to pass to BaggingRegressor constructor. See
+        http://scikit-learn.org/stable/modules/generated/sklearn.ensemble.BaggingRegressor.html
+        for possibilities.
+
+
+    Returns
+    -------
+    None
+
+
+    References
+    ----------
+    .. [Gao2012] Gao, F., Kustas, W. P., & Anderson, M. C. (2012). A Data
+       Mining Approach for Sharpening Thermal Satellite Imagery over Land.
+       Remote Sensing, 4(11), 3287–3319. https://doi.org/10.3390/rs4113287
+    '''
+
+    def __init__(self,
+                 highResFiles,
+                 lowResFiles,
+                 lowResQualityFiles=[],
+                 lowResGoodQualityFlags=[],
+                 cvHomogeneityThreshold=0.25,
+                 movingWindowSize=0,
+                 disaggregatingTemperature=False,
+                 regressorOpt={}):
+
+        super(RandomForestSharpener, self).__init__(highResFiles,
+                                                     lowResFiles,
+                                                     lowResQualityFiles,
+                                                     lowResGoodQualityFlags,
+                                                     cvHomogeneityThreshold,
+                                                     movingWindowSize,
+                                                     disaggregatingTemperature,
+                                                     regressorOpt=regressorOpt,
+                                                     baggingRegressorOpt={})
+
+
+    def _doFit(self, goodData_LR, goodData_HR, weight, local):
+        ''' Private function. Fits the neural network.
+        '''
+
+        # Once all the samples have been picked build the regression using
+        # neural network approach
+        print('Fitting random forest')
+        HR_scaler = preprocessing.StandardScaler()
+        data_HR = HR_scaler.fit_transform(goodData_HR)
+        LR_scaler = preprocessing.StandardScaler()
+        data_LR = LR_scaler.fit_transform(goodData_LR.reshape(-1, 1))
+        reg = ensemble.RandomForestRegressor(**self.regressorOpt)
+
+        if data_HR.shape[0] <= 1:
+            reg.max_samples = 1.0
+        reg = reg.fit(data_HR, np.ravel(data_LR), sample_weight=weight)
+
+        return {"reg": reg, "HR_scaler": HR_scaler, "LR_scaler": LR_scaler}
+
+    def _doPredict(self, inData, nn):
+        ''' Private function. Calls the neural network.
+        '''
+
+        reg = nn["reg"]
+        HR_scaler = nn["HR_scaler"]
+        LR_scaler = nn["LR_scaler"]
+
+        origShape = inData.shape
+        if len(origShape) == 3:
+            bands = origShape[2]
+        else:
+            bands = 1
+
+        # Do the actual neural network regression
+        inData = inData.reshape((-1, bands))
+        inData = HR_scaler.transform(inData)
+        outData = reg.predict(inData)
+        outData = LR_scaler.inverse_transform(outData)
+        outData = outData.reshape((origShape[0], origShape[1]))
+
+        return outData
