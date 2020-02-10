@@ -1159,8 +1159,11 @@ class RandomForestSharpener(DecisionTreeSharpener):
                  lowResGoodQualityFlags=[],
                  cvHomogeneityThreshold=0.25,
                  movingWindowSize=0,
+<<<<<<< HEAD
                  perLeafLinearRegression=True,
                  linearRegressionExtrapolationRatio=0.25,
+=======
+>>>>>>> Initial commit for Random Forest regresssion
                  disaggregatingTemperature=False,
                  regressorOpt={}):
 
@@ -1171,8 +1174,11 @@ class RandomForestSharpener(DecisionTreeSharpener):
                                                      cvHomogeneityThreshold,
                                                      movingWindowSize,
                                                      disaggregatingTemperature,
+<<<<<<< HEAD
                                                      perLeafLinearRegression,
                                                      linearRegressionExtrapolationRatio,
+=======
+>>>>>>> Initial commit for Random Forest regresssion
                                                      regressorOpt=regressorOpt,
                                                      baggingRegressorOpt={})
 
@@ -1188,6 +1194,7 @@ class RandomForestSharpener(DecisionTreeSharpener):
         data_HR = HR_scaler.fit_transform(goodData_HR)
         LR_scaler = preprocessing.StandardScaler()
         data_LR = LR_scaler.fit_transform(goodData_LR.reshape(-1, 1))
+<<<<<<< HEAD
         # If per leaf linear regression is used then use modified
         # DecisionTreeRegressor. Otherwise use the standard one.
         if self.perLeafLinearRegression:
@@ -1198,6 +1205,12 @@ class RandomForestSharpener(DecisionTreeSharpener):
             reg = \
                 ensemble.RandomForestRegressor(**self.regressorOpt)
 
+=======
+        reg = ensemble.RandomForestRegressor(**self.regressorOpt)
+
+        if data_HR.shape[0] <= 1:
+            reg.max_samples = 1.0
+>>>>>>> Initial commit for Random Forest regresssion
         reg = reg.fit(data_HR, np.ravel(data_LR), sample_weight=weight)
         if data_HR.shape[0] <= 1:
             reg.max_samples = 1.0
@@ -1225,6 +1238,7 @@ class RandomForestSharpener(DecisionTreeSharpener):
         outData = LR_scaler.inverse_transform(outData)
         outData = outData.reshape((origShape[0], origShape[1]))
 
+<<<<<<< HEAD
         return outData
 
 class RandomForestRegressorWithLinearLeafRegression(ensemble.RandomForestRegressor):
@@ -1342,3 +1356,6 @@ class RandomForestRegressorWithLinearLeafRegression(ensemble.RandomForestRegress
                                         self.leafParameters[leafValue]["max"] + extrapolationRange)
 
             return y
+=======
+        return outData
+>>>>>>> Initial commit for Random Forest regresssion
