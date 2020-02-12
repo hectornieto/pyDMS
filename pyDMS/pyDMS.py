@@ -325,6 +325,7 @@ class DecisionTreeSharpener(object):
                 qualityPix = np.in1d(subsetQualityMask.ravel(),
                                      self.lowResGoodQualityFlags).reshape(subsetQualityMask.shape)
                 quality_LR = None
+                del subsetQuality_LR
             else:
                 qualityPix = np.ones(data_LR.shape).astype(bool)
 
@@ -415,11 +416,8 @@ class DecisionTreeSharpener(object):
                           str(percentageUsedPixels)+'% of avaiable low-resolution data.')
 
             # Close all files
-            scene_HR = None
-            scene_LR = None
-            subsetScene_LR = None
-            if self.useQuality_LR:
-                subsetQuality_LR = None
+            del scene_HR, scene_LR, subsetScene_LR
+
             fileNum = fileNum + 1
 
         self.windowExtents = extents
@@ -519,15 +517,16 @@ class DecisionTreeSharpener(object):
                                            "MEM",
                                            noDataValue=np.nan)
             windowedResidual, _, _ = self._calculateResidual(outWindowScene, lowResScene)
-            outWindowScene = None
+            del outWindowScene
+
             outFullScene = utils.saveImg(outFullData,
                                          highResFile.GetGeoTransform(),
                                          highResFile.GetProjection(),
                                          "MEM",
                                          noDataValue=np.nan)
             fullResidual, _, _ = self._calculateResidual(outFullScene, lowResScene)
-            outFullScene = None
-            lowResScene = None
+            del outFullScene, lowResScene
+
             # windowed weight
             ww = (1/windowedResidual)**2/((1/windowedResidual)**2 + (1/fullResidual)**2)
             # full weight
@@ -547,8 +546,7 @@ class DecisionTreeSharpener(object):
                                  "MEM",
                                  noDataValue=np.nan)
 
-        highResFile = None
-        inData = None
+        del highResFile, inData
         return outImage
 
     def residualAnalysis(self, disaggregatedFile, lowResFilename, lowResQualityFilename=None,
@@ -631,9 +629,7 @@ class DecisionTreeSharpener(object):
         print("LR residual bias: "+str(np.nanmean(residual_LR)))
         print("LR residual RMSD: "+str(np.nanmean(residual_LR**2)**0.5))
 
-        scene_HR = None
-        scene_LR = None
-        quality_LR = None
+        del scene_HR, scene_LR, quality_LR
 
         return residualImage, correctedImage
 
@@ -706,6 +702,7 @@ class DecisionTreeSharpener(object):
             goodPixMask_LR = np.in1d(goodPixMask_LR.ravel(),
                                      self.lowResGoodQualityFlags).reshape(goodPixMask_LR.shape)
             data_LR[~goodPixMask_LR] = np.nan
+            del subsetQuality_LR
 
         # Then resample high res scene to low res pixel size
         if self.disaggregatingTemperature:
@@ -732,14 +729,16 @@ class DecisionTreeSharpener(object):
                                    subsetScene_LR.GetProjection(), "MEM", noDataValue=np.nan)
         residualScene_BL = utils.resampleWithGdalWarp(residualDs, downscaledScene,
                                                       resampleAlg="bilinear")
-        residualDs = None
+        del residualDs
 
         residual = residualScene_BL.GetRasterBand(1).ReadAsArray()
+
         # Sometimes there can be 1 HR pixel NaN border arond LR invalid pixels due to resampling.
         # Fuction below fixes this. Image border pixels are excluded due to numba stencil
         # limitations.
         residual[1:-1, 1:-1] = utils.removeEdgeNaNs(residual)[1:-1, 1:-1]
-        residualScene_BL = None
+        del residualScene_BL
+
 
         # The residual array might be slightly smaller then the downscaled because
         # of the subsetting of the low resolution scene. In that case just pad
@@ -755,9 +754,7 @@ class DecisionTreeSharpener(object):
 
             residual = temp
 
-        residualScene = None
-        subsetScene_LR = None
-        subsetQuality_LR = None
+        del subsetScene_LR
 
         return residual, residual_LR, gt_LR
 
@@ -1059,8 +1056,6 @@ class RandomForestSharpener(DecisionTreeSharpener):
         data_LR = LR_scaler.fit_transform(goodData_LR.reshape(-1, 1))
         reg = ensemble.RandomForestRegressor(**self.regressorOpt)
 
-        if data_HR.shape[0] <= 1:
-            reg.max_samples = 1.0
         reg = reg.fit(data_HR, np.ravel(data_LR), sample_weight=weight)
 
         return {"reg": reg, "HR_scaler": HR_scaler, "LR_scaler": LR_scaler}
