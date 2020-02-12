@@ -324,7 +324,9 @@ class DecisionTreeSharpener(object):
                 subsetQualityMask = subsetQuality_LR.GetRasterBand(1).ReadAsArray()
                 qualityPix = np.in1d(subsetQualityMask.ravel(),
                                      self.lowResGoodQualityFlags).reshape(subsetQualityMask.shape)
+
                 del subsetQuality_LR, quality_LR
+
             else:
                 qualityPix = np.ones(data_LR.shape).astype(bool)
 
