@@ -1158,6 +1158,8 @@ class RandomForestSharpener(DecisionTreeSharpener):
                  lowResGoodQualityFlags=[],
                  cvHomogeneityThreshold=0.25,
                  movingWindowSize=0,
+                 perLeafLinearRegression=True,
+                 linearRegressionExtrapolationRatio=0.25,
                  disaggregatingTemperature=False,
                  regressorOpt={}):
 
@@ -1168,6 +1170,8 @@ class RandomForestSharpener(DecisionTreeSharpener):
                                                      cvHomogeneityThreshold,
                                                      movingWindowSize,
                                                      disaggregatingTemperature,
+                                                     perLeafLinearRegression,
+                                                     linearRegressionExtrapolationRatio,
                                                      regressorOpt=regressorOpt,
                                                      baggingRegressorOpt={})
 
@@ -1183,11 +1187,19 @@ class RandomForestSharpener(DecisionTreeSharpener):
         data_HR = HR_scaler.fit_transform(goodData_HR)
         LR_scaler = preprocessing.StandardScaler()
         data_LR = LR_scaler.fit_transform(goodData_LR.reshape(-1, 1))
-        reg = ensemble.RandomForestRegressor(**self.regressorOpt)
+        # If per leaf linear regression is used then use modified
+        # DecisionTreeRegressor. Otherwise use the standard one.
+        if self.perLeafLinearRegression:
+            reg = \
+                RandomForestRegressorWithLinearLeafRegression(self.linearRegressionExtrapolationRatio,
+                                                              self.regressorOpt)
+        else:
+            reg = \
+                ensemble.RandomForestRegressor(**self.regressorOpt)
 
+        reg = reg.fit(data_HR, np.ravel(data_LR), sample_weight=weight)
         if data_HR.shape[0] <= 1:
             reg.max_samples = 1.0
-        reg = reg.fit(data_HR, np.ravel(data_LR), sample_weight=weight)
 
         return {"reg": reg, "HR_scaler": HR_scaler, "LR_scaler": LR_scaler}
 
@@ -1213,3 +1225,119 @@ class RandomForestSharpener(DecisionTreeSharpener):
         outData = outData.reshape((origShape[0], origShape[1]))
 
         return outData
+
+class RandomForestRegressorWithLinearLeafRegression(ensemble.RandomForestRegressor):
+        ''' Decision tree regressor with added linear (bayesian ridge) regression
+        for all the data points falling within each decision tree leaf node.
+
+        Parameters
+        ----------
+        linearRegressionExtrapolationRatio: float (optional, default: 0.25)
+            A limit on extrapolation allowed in the per-leaf linear regressions.
+            The ratio is multiplied by the range of values present in each leaves'
+            training dataset and added (substracted) to the maxiumum (minimum)
+            value.
+
+        decisionTreeRegressorOpt: dictionary (optional, default: {})
+            Options to pass to DecisionTreeRegressor constructor. See
+            http://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeRegressor.html
+            for possibilities.
+
+        Returns
+        -------
+        None
+        '''
+
+        def __init__(self, linearRegressionExtrapolationRatio=0.25, randomForestRegressorOpt={}):
+            super(RandomForestRegressorWithLinearLeafRegression, self).__init__(**randomForestRegressorOpt)
+            self.randomForestRegressorOpt = randomForestRegressorOpt
+            self.leafParameters = {}
+            self.linearRegressionExtrapolationRatio = linearRegressionExtrapolationRatio
+
+        def fit(self, X, y, sample_weight, fitOpt={}):
+            ''' Build a decision tree regressor from the training set (X, y).
+
+            Parameters
+            ----------
+            X: array-like or sparse matrix, shape = [n_samples, n_features]
+                The training input samples. Internally, it will be converted to
+                dtype=np.float32 and if a sparse matrix is provided to a sparse
+                csc_matrix.
+
+            y: array-like, shape = [n_samples] or [n_samples, n_outputs]
+                The target values (real numbers). Use dtype=np.float64 and
+                order='C' for maximum efficiency.
+
+            sample_weight: array-like, shape = [n_samples] or None
+                Sample weights. If None, then samples are equally weighted. Splits
+                that would create child nodes with net zero or negative weight are
+                ignored while searching for a split in each node.
+
+            fitOpt: dictionary (optional, default: {})
+                Options to pass to DecisionTreeRegressor fit function. See
+                http://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeRegressor.html
+                for possibilities.
+
+            Returns
+            -------
+            Self
+            '''
+
+            # Fit a normal regression tree
+            super(RandomForestRegressorWithLinearLeafRegression, self).fit(X, y, sample_weight,
+                                                                           **fitOpt)
+
+            # Create a linear regression for all input points which fall into
+            # one output leaf
+            predictedValues = super(RandomForestRegressorWithLinearLeafRegression, self).predict(X)
+            leafValues = np.unique(predictedValues)
+
+            for value in leafValues:
+                ind = predictedValues == value
+                leafLinearRegrsion = linear_model.BayesianRidge()
+                leafLinearRegrsion.fit(X[ind, :], y[ind])
+                self.leafParameters[value] = {"linearRegression": leafLinearRegrsion,
+                                              "max": np.max(y[ind]),
+                                              "min": np.min(y[ind])}
+
+            return self
+
+        def predict(self, X, predictOpt={}):
+            ''' Predict class or regression value for X.
+
+            Parameters
+            ----------
+            X: array-like or sparse matrix of shape = [n_samples, n_features]
+                The input samples. Internally, it will be converted to
+                dtype=np.float32 and if a sparse matrix is provided to a sparse
+                csr_matrix.
+
+            predictOpt: dictionary (optional, default: {})
+                Options to pass to DecisionTreeRegressor predict function. See
+                http://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeRegressor.html
+                for possibilities.
+
+            Returns
+            -------
+            y: array of shape = [n_samples] or [n_samples, n_outputs]
+                The predicted classes, or the predict values.
+            '''
+
+            # Do normal regression tree prediction
+            y = super(RandomForestRegressorWithLinearLeafRegression, self).predict(X, **predictOpt)
+
+            # And also apply per-leaf linear regression
+            for leafValue in self.leafParameters.keys():
+                ind = y == leafValue
+                if X[ind, :].size > 0:
+                    y[ind] = self.leafParameters[leafValue]["linearRegression"].predict(X[ind, :])
+                    # Limit extrapolation
+                    extrapolationRange = self.linearRegressionExtrapolationRatio * (
+                            self.leafParameters[leafValue]["max"] -
+                            self.leafParameters[leafValue]["min"])
+                    y[ind] = np.maximum(y[ind],
+                                        self.leafParameters[leafValue]["min"] - extrapolationRange)
+                    y[ind] = np.minimum(y[ind],
+                                        self.leafParameters[leafValue]["max"] + extrapolationRange)
+
+            return y
