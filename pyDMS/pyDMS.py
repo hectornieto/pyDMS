@@ -278,8 +278,6 @@ class DecisionTreeSharpener(object):
         self.movingWindowExtension = self.movingWindowSize * 0.25
         self.windowExtents = []
 
-        self.minimumSampleNumber = minimumSampleNumber
-
         self.disaggregatingTemperature = disaggregatingTemperature
 
         # Flag to determine whether a multivariate linear regression should be
@@ -406,6 +404,7 @@ class DecisionTreeSharpener(object):
                         print('Homogeneity CV threshold: %.2f' % self.cvHomogeneityThreshold)
                 homogenousPix = np.logical_and(resCVWindow < self.cvHomogeneityThreshold,
                                                resCVWindow > 0)
+                goodPix = np.logical_and(homogenousPix, qualityPixWindow)
 
                 goodData_LR[i] = utils.appendNpArray(goodData_LR[i],
                                                      data_LR[rows, cols][goodPix])
@@ -430,11 +429,9 @@ class DecisionTreeSharpener(object):
                           str(percentageUsedPixels)+'% of avaiable low-resolution data.')
 
             # Close all files
-            scene_HR = None
-            scene_LR = None
-            subsetScene_LR = None
+            del scene_HR, scene_LR, subsetScene_LR
             if self.useQuality_LR:
-                subsetQuality_LR = None
+                del subsetQuality_LR
             fileNum = fileNum + 1
 
         self.windowExtents = extents
@@ -507,7 +504,6 @@ class DecisionTreeSharpener(object):
         # Do the downscailing on the moving windows if there are any and also process the full
         # scene using the same windows to optimize memory usage
         for i, extent in enumerate(self.windowExtents):
-            print(i)
             if self.reg[i] is not None:
                 [minX, minY] = utils.point2pix(extent[0], gt)  # UL
                 [minX, minY] = [max(minX, 0), max(minY, 0)]
@@ -576,8 +572,7 @@ class DecisionTreeSharpener(object):
                                  "MEM",
                                  noDataValue=np.nan)
 
-        highResFile = None
-        inData = None
+        del highResFile, inData
         return outImage
 
     def residualAnalysis(self, disaggregatedFile, lowResFilename, lowResQualityFilename=None,
@@ -647,9 +642,7 @@ class DecisionTreeSharpener(object):
         print("LR residual bias: "+str(np.nanmean(residual_LR)))
         print("LR residual RMSD: "+str(np.nanmean(residual_LR**2)**0.5))
 
-        scene_HR = None
-        scene_LR = None
-        quality_LR = None
+        del scene_HR, scene_LR, quality_LR
 
         return residualImage, correctedImage
 
@@ -942,10 +935,6 @@ class NeuralNetworkSharpener(DecisionTreeSharpener):
     movingWindowSize: integer (optional, default: 0)
         The size of local regression moving window in low-resolution pixels. If
         set to 0 then only global regression is performed.
-
-    minimumSampleNumber: integer (optional, default: 10)
-        The number of samples requried to train a regression model. Applicable both to local and
-        global regressions.
 
     disaggregatingTemperature: boolean (optional, default: False)
         Flag indicating whether the parameter to be disaggregated is
