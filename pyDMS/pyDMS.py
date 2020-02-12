@@ -1031,7 +1031,11 @@ class RandomForestSharpener(DecisionTreeSharpener):
                  lowResGoodQualityFlags=[],
                  cvHomogeneityThreshold=0.25,
                  movingWindowSize=0,
+<<<<<<< HEAD
                  perLeafLinearRegression=False,
+=======
+                 perLeafLinearRegression=True,
+>>>>>>> 24f84b3 (Allow per leaf linear regression in Random Forest)
                  linearRegressionExtrapolationRatio=0.25,
                  disaggregatingTemperature=False,
                  regressorOpt={}):
@@ -1069,6 +1073,10 @@ class RandomForestSharpener(DecisionTreeSharpener):
         else:
             reg = \
                 ensemble.RandomForestRegressor(**self.regressorOpt)
+<<<<<<< HEAD
+=======
+        # reg = ensemble.RandomForestRegressor(**self.regressorOpt)
+>>>>>>> 24f84b3 (Allow per leaf linear regression in Random Forest)
 
         reg = reg.fit(data_HR, np.ravel(data_LR), sample_weight=weight)
 
@@ -1098,7 +1106,10 @@ class RandomForestSharpener(DecisionTreeSharpener):
 
         return outData
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 24f84b3 (Allow per leaf linear regression in Random Forest)
 class RandomForestRegressorWithLinearLeafRegression(ensemble.RandomForestRegressor):
         ''' Decision tree regressor with added linear (bayesian ridge) regression
         for all the data points falling within each decision tree leaf node.
@@ -1213,6 +1224,10 @@ class RandomForestRegressorWithLinearLeafRegression(ensemble.RandomForestRegress
                     y[ind] = np.minimum(y[ind],
                                         self.leafParameters[leafValue]["max"] + extrapolationRange)
 
+<<<<<<< HEAD
 
             return y
 
+=======
+            return y
+>>>>>>> 24f84b3 (Allow per leaf linear regression in Random Forest)
