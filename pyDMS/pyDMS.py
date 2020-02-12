@@ -1212,7 +1212,7 @@ class RandomForestRegressorWithLinearLeafRegression(ensemble.RandomForestRegress
                     y[ind] = np.minimum(y[ind],
                                         self.leafParameters[leafValue]["max"] + extrapolationRange)
 
+
             return y
 
-        return outData
 
