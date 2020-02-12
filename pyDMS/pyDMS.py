@@ -324,7 +324,6 @@ class DecisionTreeSharpener(object):
                 subsetQualityMask = subsetQuality_LR.GetRasterBand(1).ReadAsArray()
                 qualityPix = np.in1d(subsetQualityMask.ravel(),
                                      self.lowResGoodQualityFlags).reshape(subsetQualityMask.shape)
-
                 del subsetQuality_LR, quality_LR
 
             else:
@@ -734,13 +733,15 @@ class DecisionTreeSharpener(object):
         del residualDs
 
         residual = residualScene_BL.GetRasterBand(1).ReadAsArray()
+<<<<<<< HEAD
 
         # Sometimes there can be 1 HR pixel NaN border arond LR invalid pixels due to resampling.
         # Fuction below fixes this. Image border pixels are excluded due to numba stencil
         # limitations.
         residual[1:-1, 1:-1] = utils.removeEdgeNaNs(residual)[1:-1, 1:-1]
         del residualScene_BL
-
+        residual[np.isnan(residualScene_NN.GetRasterBand(1).ReadAsArray())] = np.NaN
+        del residualScene_NN, residualScene_BL
 
         # The residual array might be slightly smaller then the downscaled because
         # of the subsetting of the low resolution scene. In that case just pad
