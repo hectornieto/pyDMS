@@ -707,6 +707,7 @@ class DecisionTreeSharpener(object):
                                           "MEM")
             resMean, _ = utils.resampleHighResToLowRes(radianceScene,
                                                        subsetScene_LR)
+            del radianceScene
             # Find the residual (difference) between the two)
             residual_LR = data_LR**4 - resMean[:, :, 0]
         else:
