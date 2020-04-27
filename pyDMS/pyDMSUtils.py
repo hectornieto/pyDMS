@@ -147,6 +147,7 @@ def saveImg(data, geotransform, proj, outPath, noDataValue=None, fieldNames=[]):
             ds.close()
             ds = gdal.Open('NETCDF:"'+outPath+'":'+fieldNames[0])
 
+
     if outPath != "MEM":
         print('Saved ' + outPath)
 
