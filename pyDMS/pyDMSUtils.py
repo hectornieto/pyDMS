@@ -13,7 +13,7 @@ from numba import njit, stencil
 
 from osgeo import gdal
 from pyproj import Proj, Transformer
-
+import multiprocessing as mp
 
 def openRaster(raster):
     closeOnExit = False
@@ -142,6 +142,7 @@ def saveImg(data, geotransform, proj, outPath, noDataValue=None, fieldNames=[]):
             ds.close()
             ds = gdal.Open('NETCDF:"'+outPath+'":'+fieldNames[0])
 
+    if outPath != "MEM":
         print('Saved ' + outPath)
 
     return ds
@@ -182,7 +183,8 @@ def appendNpArray(array, data, axis=None):
 
 # Reproject and subset the given low resolution datasets to high resolution
 # scene projection and extent
-def reprojectSubsetLowResScene(highResScene, lowResScene, resampleAlg=gdal.GRA_Bilinear):
+def reprojectSubsetLowResScene(highResScene, lowResScene,
+                               resampleAlg=gdal.GRA_Bilinear):
 
     # Read the required metadata
     proj_HR, gt_HR, xsize_HR, ysize_HR, extent = getRasterInfo(highResScene)[0:5]
