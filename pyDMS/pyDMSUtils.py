@@ -12,7 +12,7 @@ import scipy.ndimage as ndi
 
 from osgeo import gdal
 from pyproj import Proj, Transformer
-
+import multiprocessing as mp
 
 def openRaster(raster):
     closeOnExit = False
@@ -39,10 +39,12 @@ def getRasterInfo(raster):
 
 
 def resampleWithGdalWarp(srcFile, templateFile, outFile="", outFormat="MEM",
-                         resampleAlg="average"):
+                         resampleAlg="average", warp_options=None):
     # Get template projection, extent and resolution
     proj, gt, sizeX, sizeY, extent, _ = getRasterInfo(templateFile)
-
+    if warp_options is None:
+        warp_options = {"multithread": True,
+                        "warpOptions": ["NUM_THREADS=%i"%mp.cpu_count()]}
     # Resample with GDAL warp
     outDs = gdal.Warp(str(outFile),
                       openRaster(srcFile)[0],
@@ -51,7 +53,8 @@ def resampleWithGdalWarp(srcFile, templateFile, outFile="", outFormat="MEM",
                       xRes=gt[1],
                       yRes=gt[5],
                       outputBounds=extent,
-                      resampleAlg=resampleAlg)
+                      resampleAlg=resampleAlg,
+                      **warp_options)
 
     return outDs
 
@@ -180,7 +183,9 @@ def appendNpArray(array, data, axis=None):
 
 # Reproject and subset the given low resolution datasets to high resolution
 # scene projection and extent
-def reprojectSubsetLowResScene(highResScene, lowResScene, resampleAlg=gdal.GRA_Bilinear):
+def reprojectSubsetLowResScene(highResScene, lowResScene,
+                               resampleAlg=gdal.GRA_Bilinear,
+                               warp_options=None):
 
     # Read the required metadata
     proj_HR, gt_HR, xsize_HR, ysize_HR, extent = getRasterInfo(highResScene)[0:5]
@@ -202,6 +207,9 @@ def reprojectSubsetLowResScene(highResScene, lowResScene, resampleAlg=gdal.GRA_B
     # the new projection
     UL_x, UL_y = transformer.transform(gt_LR[0], gt_LR[3])
     gt_LR = [UL_x, xRes_LR_proj, 0, UL_y, 0, yRes_LR_proj]
+    if warp_options is None:
+        warp_options = {"multithread": True,
+                        "warpOptions": ["NUM_THREADS=%i"%mp.cpu_count()]}
 
     # Now subset to high resolution scene extent while not shifting pixels
     UL = pix2point(point2pix([extent[0], extent[3]], gt_LR, upperBound=False), gt_LR)
@@ -213,7 +221,8 @@ def reprojectSubsetLowResScene(highResScene, lowResScene, resampleAlg=gdal.GRA_B
                     resampleAlg=gdal.GRA_NearestNeighbour,
                     xRes=gt_LR[1],
                     yRes=gt_LR[5],
-                    outputBounds=[UL[0], BR[1], BR[0], UL[1]])
+                    outputBounds=[UL[0], BR[1], BR[0], UL[1]],
+                    **warp_options)
 
     return out
 
