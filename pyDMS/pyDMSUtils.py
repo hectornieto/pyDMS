@@ -12,7 +12,7 @@ import scipy.ndimage as ndi
 from numba import njit, stencil
 
 from osgeo import gdal
-
+import multiprocessing as mp
 
 def openRaster(raster):
     closeOnExit = False
@@ -39,10 +39,12 @@ def getRasterInfo(raster):
 
 
 def resampleWithGdalWarp(srcFile, templateFile, outFile="", outFormat="MEM",
-                         resampleAlg="average"):
+                         resampleAlg="average", warp_options=None):
     # Get template projection, extent and resolution
     proj, gt, sizeX, sizeY, extent, _ = getRasterInfo(templateFile)
-
+    if warp_options is None:
+        warp_options = {"multithread": True,
+                        "warpOptions": ["NUM_THREADS=%i"%mp.cpu_count()]}
     # Resample with GDAL warp
     outDs = gdal.Warp(outFile,
                       srcFile,
@@ -51,7 +53,8 @@ def resampleWithGdalWarp(srcFile, templateFile, outFile="", outFormat="MEM",
                       xRes=gt[1],
                       yRes=gt[5],
                       outputBounds=extent,
-                      resampleAlg=resampleAlg)
+                      resampleAlg=resampleAlg,
+                      **warp_options)
 
     return outDs
 
@@ -179,11 +182,16 @@ def appendNpArray(array, data, axis=None):
 
 # Reproject and subset the given low resolution datasets to high resolution
 # scene projection and extent
-def reprojectSubsetLowResScene(highResScene, lowResScene, resampleAlg=gdal.GRA_Bilinear):
+def reprojectSubsetLowResScene(highResScene, lowResScene,
+                               resampleAlg=gdal.GRA_Bilinear,
+                               warp_options=None):
 
     # Read the required metadata
     proj_HR, gt_HR, xsize_HR, ysize_HR, extent = getRasterInfo(highResScene)[0:5]
 
+    if warp_options is None:
+        warp_options = {"multithread": True,
+                        "warpOptions": ["NUM_THREADS=%i"%mp.cpu_count()]}
     # Reproject low res scene to high res scene's projection to get the original
     # pixel size in the new projection
     lowRes, close = openRaster(lowResScene)
@@ -191,9 +199,11 @@ def reprojectSubsetLowResScene(highResScene, lowResScene, resampleAlg=gdal.GRA_B
                     lowRes.GetDescription(),
                     format="MEM",
                     dstSRS=proj_HR,
-                    resampleAlg=gdal.GRA_NearestNeighbour)
+                    resampleAlg=gdal.GRA_NearestNeighbour,
+                    **warp_options)
+
     if close:
-        lowRes = None
+        del lowRes
 
     # Now subset to high resolution scene extent while not shifting pixels
     gt_LR = getRasterInfo(out)[1]
@@ -205,8 +215,11 @@ def reprojectSubsetLowResScene(highResScene, lowResScene, resampleAlg=gdal.GRA_B
                     out,
                     format="MEM",
                     dstSRS=proj_HR,
-                    resampleAlg=gdal.GRA_NearestNeighbour,
-                    outputBounds=[UL[0], BR[1], BR[0], UL[1]])
+                    xRes=pixSize_LR[0],
+                    yRes=pixSize_LR[1],
+                    outputBounds=[UL[0], BR[1], BR[0], UL[1]],
+                    resampleAlg=resampleAlg,
+                    **warp_options)
 
     return out
 
