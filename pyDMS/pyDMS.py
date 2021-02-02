@@ -739,7 +739,6 @@ class DecisionTreeSharpener(object):
         residual[1:-1, 1:-1] = utils.removeEdgeNaNs(residual)[1:-1, 1:-1]
         del residualScene_BL
 
-
         # The residual array might be slightly smaller then the downscaled because
         # of the subsetting of the low resolution scene. In that case just pad
         # the missing values with neighbours.
