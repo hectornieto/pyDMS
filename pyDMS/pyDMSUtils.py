@@ -211,11 +211,8 @@ def reprojectSubsetLowResScene(highResScene, lowResScene,
                     out,
                     format="MEM",
                     dstSRS=proj_HR,
-                    xRes=pixSize_LR[0],
-                    yRes=pixSize_LR[1],
-                    outputBounds=[UL[0], BR[1], BR[0], UL[1]],
                     resampleAlg=resampleAlg,
-                    **warp_options)
+                    outputBounds=[UL[0], BR[1], BR[0], UL[1]])
 
     return out
 
