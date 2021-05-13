@@ -206,6 +206,7 @@ def reprojectSubsetLowResScene(highResScene, lowResScene,
     if close:
         del lowRes
 
+
     # Now subset to high resolution scene extent while not shifting pixels
     gt_LR = getRasterInfo(out)[1]
 
