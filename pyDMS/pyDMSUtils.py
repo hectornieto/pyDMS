@@ -111,9 +111,14 @@ def saveImg(data, geotransform, proj, outPath, noDataValue=None, fieldNames=[]):
             fileFormat = "netCDF"
             driverOpt = ["FORMAT=NC2"]
             is_netCDF = True
-        else:
+        if ext.lower() == ".cog":
             fileFormat = "COG"
             driverOpt = ['COMPRESS=DEFLATE', 'PREDICTOR=YES', 'BIGTIFF=IF_SAFER']
+            is_netCDF = False
+        else:
+            fileFormat = "GTiff"
+            driverOpt = ['COMPRESS=DEFLATE', 'PREDICTOR=1', 'BIGTIFF=IF_SAFER']
+            is_netCDF = False            
         out_ds = gdal.Translate(outPath, ds, format=fileFormat, creationOptions=driverOpt,
                                 noData=noDataValue, stats=True)
         # If GDAL driers for other formats do not exist then default to GeoTiff
