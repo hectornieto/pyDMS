@@ -218,13 +218,10 @@ def reprojectSubsetLowResScene(highResScene, lowResScene,
     UL = pix2point(point2pix([extent[0], extent[3]], gt_LR, upperBound=False), gt_LR)
     BR = pix2point(point2pix([extent[2], extent[1]], gt_LR, upperBound=True), gt_LR)
 
-
     out = gdal.Warp("",
                     out,
                     format="MEM",
                     dstSRS=proj_HR,
-                    xRes=pixSize_LR[0],
-                    yRes=pixSize_LR[1],
                     outputBounds=[UL[0], BR[1], BR[0], UL[1]],
                     resampleAlg=resampleAlg,
                     **warp_options)
