@@ -11,17 +11,19 @@ import numpy as np
 from osgeo import gdal
 from sklearn import tree, linear_model, ensemble, preprocessing
 from sklearn.ensemble import RandomForestRegressor
-import sklearn.neural_network as ann_sklearn
+from sklearn.neural_network import MLPRegressor
 import xgboost
 
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel
 from sklearn.cluster import KMeans
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.svm import SVR
 import pandas as pd
 
 import pyDMS.pyDMSUtils as utils
 from scipy import stats as st
-
+import yaml
 
 class RandomForestRegressorWLLR(RandomForestRegressor):
     def __init__(self,
@@ -81,11 +83,6 @@ class GaussianProcessRegressorWLLR(GaussianProcessRegressor):
             normalize_y=normalize_y,
             copy_X_train=copy_X_train,
             random_state=random_state)
-
-        self.kernel = kernel
-        self.alpha = alpha
-        self.optimizer = optimizer
-        self.normalize_y = normalize_y
 
 
 class DecisionTreeRegressorWithLinearLeafRegression(tree.DecisionTreeRegressor):
@@ -330,7 +327,8 @@ class DecisionTreeSharpener(object):
                  regressorOpt={},
                  ensembleOpt={},
                  downsample=None,
-                 chunk_size=1e9):
+                 chunk_size=1e9,
+                 export_stats=False):
 
         self.highResFiles = highResFiles
         self.lowResFiles = lowResFiles
@@ -383,6 +381,7 @@ class DecisionTreeSharpener(object):
         self.regressorOpt = regressorOpt
         self.ensembleOpt = ensembleOpt
         self.chunk_size = np.int64(chunk_size)
+        self.export_stats = export_stats
 
     def trainSharpener(self):
         ''' Train the sharpener using high- and low-resolution input files
@@ -425,7 +424,7 @@ class DecisionTreeSharpener(object):
                 subsetQualityMask = subsetQuality_LR.GetRasterBand(1).ReadAsArray()
                 qualityPix = np.in1d(subsetQualityMask.ravel(),
                                      self.lowResGoodQualityFlags).reshape(subsetQualityMask.shape)
-                quality_LR = None
+                del quality_LR
             else:
                 qualityPix = np.ones(data_LR.shape).astype(bool)
 
@@ -515,10 +514,13 @@ class DecisionTreeSharpener(object):
                           str(np.prod(goodData_LR[i].shape)) + ' representing ' +
                           str(percentageUsedPixels)+'% of avaiable low-resolution data.')
 
+            if self.export_stats:
+                self.stats_dict = {"N_train": int(np.size(goodData_LR))}
+
             # Close all files
-            scene_HR = None
-            scene_LR = None
-            subsetScene_LR = None
+            del scene_HR
+            del scene_LR
+            del subsetScene_LR
             if self.useQuality_LR:
                 subsetQuality_LR = None
             fileNum = fileNum + 1
@@ -537,6 +539,7 @@ class DecisionTreeSharpener(object):
             if len(goodData_LR[i]) > 0:
                 self.reg[i] = \
                     self._doFit(goodData_LR[i], goodData_HR[i], weight[i], local)
+
 
     def applySharpener(self, highResFilename, lowResFilename=None):
         ''' Apply the trained sharpener to a given high-resolution image to
@@ -619,14 +622,14 @@ class DecisionTreeSharpener(object):
                                            highResFile.GetProjection(),
                                            "MEM")
             windowedResidual, _, _ = self._calculateResidual(outWindowScene, lowResScene)
-            outWindowScene = None
+            del outWindowScene
             outFullScene = utils.saveImg(outFullData,
                                          highResFile.GetGeoTransform(),
                                          highResFile.GetProjection(),
                                          "MEM")
             fullResidual, _, _ = self._calculateResidual(outFullScene, lowResScene)
-            outFullScene = None
-            lowResScene = None
+            del outFullScene
+            del lowResScene
             # windowed weight
             ww = (1/windowedResidual)**2/((1/windowedResidual)**2 + (1/fullResidual)**2)
             # full weight
@@ -645,8 +648,8 @@ class DecisionTreeSharpener(object):
                                  highResFile.GetProjection(),
                                  "MEM")
 
-        highResFile = None
-        inData = None
+        del highResFile
+        del inData
         return outImage
 
     def residualAnalysis(self, disaggregatedFile, lowResFilename, lowResQualityFilename=None,
@@ -723,12 +726,21 @@ class DecisionTreeSharpener(object):
                                       scene_HR.GetProjection(),
                                       "MEM")
 
-        print("LR residual bias: "+str(np.nanmean(residual_LR)))
-        print("LR residual RMSD: "+str(np.nanmean(residual_LR**2)**0.5))
+        bias = float(np.nanmean(residual_LR))
+        rmsd = float(np.nanmean(residual_LR**2)**0.5)
+        print("LR residual bias: "+str(bias))
+        print("LR residual RMSD: "+str(rmsd))
+        if self.export_stats:
+            valid = np.isfinite(residual_LR)
+            self.stats_dict["N_test"] = int(np.sum(valid))
+            self.stats_dict["bias"] = bias
+            self.stats_dict["RMSD"] = rmsd
+            with open("DMS_stats.yaml", "w") as fid:
+                yaml.dump(self.stats_dict, fid)
 
-        scene_HR = None
-        scene_LR = None
-        quality_LR = None
+        del scene_HR
+        del scene_LR
+        del quality_LR
 
         return residualImage, correctedImage
 
@@ -738,7 +750,7 @@ class DecisionTreeSharpener(object):
 
         # For local regression constrain the number of tree
         # nodes (rules) - section 2.3
-        if self.method != "gpr":
+        if self.method == "dt" or self.method == "rf" or self.method == "xbg":
             if local:
                 self.regressorOpt["max_leaf_nodes"] = 10
             else:
@@ -751,8 +763,13 @@ class DecisionTreeSharpener(object):
             goodData_HR, goodData_LR, weight = downsample_dataset_aboulalebi(goodData_HR,
                                                                   goodData_LR,
                                                                   weight,
-                                                                  self.downsample)     
+                                                                  self.downsample)
+            if self.export_stats:
+                self.stats_dict["N_train_subsampled"] = int(np.size(goodData_LR))
+
         if self.method == "dt":
+            hr_scaler = None
+            lr_scaler = None
             if self.perLeafLinearRegression:
                 baseRegressor = \
                     DecisionTreeRegressorWithLinearLeafRegression(
@@ -763,31 +780,63 @@ class DecisionTreeSharpener(object):
                 baseRegressor = tree.DecisionTreeRegressor(**self.regressorOpt)
 
             reg = ensemble.BaggingRegressor(baseRegressor, **self.ensembleOpt)
+            print("Fitting Ensemble Decision Tree Regressor")
+            reg.fit(goodData_HR, goodData_LR, sample_weight=weight)
+
         elif self.method == "rf":
+            hr_scaler = None
+            lr_scaler = None
             reg = RandomForestRegressorWLLR(
                 **self.ensembleOpt,
                 **self.regressorOpt
                 )
+            print("Fitting Random Forest Regressor")
+            reg.fit(goodData_HR, goodData_LR, sample_weight=weight)
+
         elif self.method == "xgb":
+            hr_scaler = None
+            lr_scaler = None
             reg = xgboost.XGBRegressor(**self.ensembleOpt)
+            print("Fitting XGboost Regressor")
+            reg.fit(goodData_HR, goodData_LR, sample_weight=weight)
+
         elif self.method == "gpr":
+            hr_scaler = preprocessing.StandardScaler()
+            lr_scaler = None
+            goodData_HR = hr_scaler.fit_transform(goodData_HR)
             reg = GaussianProcessRegressorWLLR(**self.regressorOpt)
-            reg = reg.fit(goodData_HR, goodData_LR)
-            return reg
+            print("Fitting Gaussian Process Regressor")
+            reg.fit(goodData_HR, goodData_LR)
+
+        elif self.method == "svr":
+            hr_scaler = preprocessing.StandardScaler()
+            goodData_HR = hr_scaler.fit_transform(goodData_HR)
+            lr_scaler = preprocessing.StandardScaler()
+            print("Fitting Support Vector Regressor")
+            goodData_LR = lr_scaler.fit_transform(goodData_LR.reshape(-1, 1))
+            reg = SupportVectorSharpener(**self.regressorOpt)
+            reg.fit(goodData_HR, np.ravel(goodData_LR), sample_weight=weight)
+
+        elif self.method == "ann":
+            hr_scaler = preprocessing.StandardScaler()
+            goodData_HR = hr_scaler.fit_transform(goodData_HR)
+            lr_scaler = preprocessing.StandardScaler()
+            print("Fitting MLP Artificial Neural Network")
+            goodData_LR = lr_scaler.fit_transform(goodData_LR.reshape(-1, 1))
+            reg = NeuralNetworkSharpener(**self.regressorOpt)
+            reg.fit(goodData_HR, np.ravel(goodData_LR))
 
         else:
             raise TypeError("Method should be one of dt, rf, xgb or gpr")
-        if goodData_HR.shape[0] <= 1:
-            reg.max_samples = 1.0
 
-        reg = reg.fit(goodData_HR, goodData_LR, sample_weight=weight)
+        return {"reg": reg, "HR_scaler": hr_scaler, "LR_scaler": lr_scaler}
 
-        return reg
-
-    def _doPredict(self, inData, reg, chunk_size=50000):
+    def _doPredict(self, inData, reg, chunk_size=None):
         ''' Private function. Calls the regression tree.
         '''
-
+        hr_scaler = reg.pop("HR_scaler")
+        lr_scaler = reg.pop("LR_scaler")
+        reg = reg["reg"]
         origShape = inData.shape
         if len(origShape) == 3:
             bands = origShape[2]
@@ -795,7 +844,10 @@ class DecisionTreeSharpener(object):
             bands = 1
         # Do the actual decision tree regression
         inData = inData.reshape((-1, bands))
-        if self.method == "gpr":
+        if hr_scaler:
+            inData = hr_scaler.transform(inData)
+
+        if chunk_size:
             n_pixels = inData.shape[0]
             outData = np.empty(inData.shape[0])
             n_chunks = np.int(np.ceil(n_pixels / chunk_size))
@@ -807,6 +859,10 @@ class DecisionTreeSharpener(object):
             print(f"Finished predicting on {n_pixels} cases", end="\n")
         else:
             outData = reg.predict(inData)
+
+        if lr_scaler:
+            outData = lr_scaler.inverse_transform(outData.reshape([-1, 1]))
+
         outData = outData.reshape((origShape[0], origShape[1]))
 
         return outData
@@ -862,13 +918,13 @@ class DecisionTreeSharpener(object):
                                                       resampleAlg="near")
         residualScene_BL = utils.resampleWithGdalWarp(residualDs, downscaledScene,
                                                       resampleAlg="bilinear")
-        residualDs = None
+        del residualDs
 
         # Bilinear resampling extrapolates by half a pixel, so need to clean it up
         residual = residualScene_BL.GetRasterBand(1).ReadAsArray()
         residual[np.isnan(residualScene_NN.GetRasterBand(1).ReadAsArray())] = np.NaN
-        residualScene_NN = None
-        residualScene_BL = None
+        del residualScene_NN
+        del residualScene_BL
 
         # The residual array might be slightly smaller then the downscaled because
         # of the subsetting of the low resolution scene. In that case just pad
@@ -884,158 +940,60 @@ class DecisionTreeSharpener(object):
 
             residual = temp
 
-        residualScene = None
-        subsetScene_LR = None
-        subsetQuality_LR = None
+        del residualScene
+        del subsetScene_LR
+        del subsetQuality_LR
 
         return residual, residual_LR, gt_LR
 
 
-class NeuralNetworkSharpener(DecisionTreeSharpener):
-    ''' Neural Network based sharpening (disaggregation) of low-resolution
-    images using high-resolution images. The implementation is mostly based on [Gao2012] as
-    implemented in DescisionTreeSharpener except that Decision Tree regressor is replaced by
-    Neural Network regressor.
+class NeuralNetworkSharpener(MLPRegressor):
+    def __init__(self,
+                 **mlp_kwargs):
 
-    Nerual network based regressor is trained with high-resolution data resampled to
-    low resolution and low-resolution data and then applied
-    directly to high-resolution data to obtain high-resolution representation
-    of the low-resolution data.
-
-    The implementation includes selecting training data based on homogeneity
-    statistics and using the homogeneity as weight factor ([Gao2012], section 2.2),
-    performing linear regression with samples located within each regression
-    tree leaf node ([Gao2012], section 2.1), using an ensemble of regression trees
-    ([Gao2012], section 2.1), performing local (moving window) and global regression and
-    combining them based on residuals ([Gao2012] section 2.3) and performing residual
-    analysis and bias correction ([Gao2012], section 2.4)
-
-    Parameters
-    ----------
-    highResFiles: list of strings
-        A list of file paths to high-resolution images to be used during the
-        training of the sharpener.
-
-    lowResFiles: list of strings
-        A list of file paths to low-resolution images to be used during the
-        training of the sharpener. There must be one low-resolution image
-        for each high-resolution image.
-
-    lowResQualityFiles: list of strings (optional, default: [])
-        A list of file paths to low-resolution quality images to be used to
-        mask out low-quality low-resolution pixels during training. If provided
-        there must be one quality image for each low-resolution image.
-
-    lowResGoodQualityFlags: list of integers (optional, default: [])
-        A list of values indicating which pixel values in the low-resolution
-        quality images should be considered as good quality.
-
-    cvHomogeneityThreshold: float (optional, default: 0.25)
-        A threshold of coeficient of variation below which high-resolution
-        pixels resampled to low-resolution are considered homogeneous and
-        usable during the training of the disaggregator.
-
-    movingWindowSize: integer (optional, default: 0)
-        The size of local regression moving window in low-resolution pixels. If
-        set to 0 then only global regression is performed.
-
-    disaggregatingTemperature: boolean (optional, default: False)
-        Flag indicating whether the parameter to be disaggregated is
-        temperature (e.g. land surface temperature). If that is the case then
-        at some points it needs to be converted into radiance. This is becasue
-        sensors measure energy, not temperature, plus radiance is the physical
-        measurements it makes sense to average, while radiometric temperature
-        behaviour is not linear.
-
-    regressorOpt: dictionary (optional, default: {})
-        Options to pass to neural network regressor constructor
-        See https://scikit-learn.org/stable/modules/generated/sklearn.neural_network.MLPRegressor.html
-        parameter description for details.
-
-    baggingRegressorOpt: dictionary (optional, default: {})
-        Options to pass to BaggingRegressor constructor. See
-        http://scikit-learn.org/stable/modules/generated/sklearn.ensemble.BaggingRegressor.html
-        for possibilities.
+        super(NeuralNetworkSharpener, self).__init__(**mlp_kwargs)
 
 
-    Returns
-    -------
-    None
-
-
-    References
-    ----------
-    .. [Gao2012] Gao, F., Kustas, W. P., & Anderson, M. C. (2012). A Data
-       Mining Approach for Sharpening Thermal Satellite Imagery over Land.
-       Remote Sensing, 4(11), 3287–3319. https://doi.org/10.3390/rs4113287
-    '''
+class SupportVectorSharpener(RandomizedSearchCV):
 
     def __init__(self,
-                 highResFiles,
-                 lowResFiles,
-                 lowResQualityFiles=[],
-                 lowResGoodQualityFlags=[],
-                 cvHomogeneityThreshold=0.25,
-                 movingWindowSize=0,
-                 disaggregatingTemperature=False,
-                 regressorOpt={},
-                 baggingRegressorOpt={}):
+                 kernel=['rbf'],
+                 c=st.expon(scale=100),
+                 gamma=st.expon(scale=.1),
+                 tol=0.001,
+                 shrinking=True,
+                 cache_size=200,
+                 max_iter=-1,
+                 n_iter=10,
+                 scoring=None,
+                 n_jobs=None,
+                 refit=True,
+                 cv=None,
+                 verbose=False,
+                 pre_dispatch='2*n_jobs',
+                 random_state=None,
+                 error_score=np.nan,
+                 return_train_score=False):
 
-        super(NeuralNetworkSharpener, self).__init__(highResFiles,
-                                                     lowResFiles,
-                                                     lowResQualityFiles,
-                                                     lowResGoodQualityFlags,
-                                                     cvHomogeneityThreshold,
-                                                     movingWindowSize,
-                                                     disaggregatingTemperature,
-                                                     regressorOpt=regressorOpt,
-                                                     baggingRegressorOpt=baggingRegressorOpt)
+        base_estimator = SVR(tol=tol,
+                             shrinking=shrinking,
+                             cache_size=cache_size,
+                             max_iter=max_iter)
 
-    def _doFit(self, goodData_LR, goodData_HR, weight, local):
-        ''' Private function. Fits the neural network.
-        '''
+        param_distributions = {"kernel": kernel, "C": c, "gamma": gamma}
+        super(SupportVectorSharpener, self).__init__(base_estimator,
+                                                     param_distributions,
+                                                     n_iter=n_iter,
+                                                     scoring=scoring,
+                                                     n_jobs=n_jobs,
+                                                     refit=refit,
+                                                     cv=cv,
+                                                     verbose=verbose,
+                                                     pre_dispatch=pre_dispatch,
+                                                     random_state=random_state,
+                                                     error_score=error_score,
+                                                     return_train_score=return_train_score)
 
-        # Once all the samples have been picked build the regression using
-        # neural network approach
-        print('Fitting neural network')
-        HR_scaler = preprocessing.StandardScaler()
-        data_HR = HR_scaler.fit_transform(goodData_HR)
-        LR_scaler = preprocessing.StandardScaler()
-        data_LR = LR_scaler.fit_transform(goodData_LR.reshape(-1, 1))
-        baseRegressor = ann_sklearn.MLPRegressor(**self.regressorOpt)
-
-        # NN regressors do not support sample weights.
-        weight = None
-
-        reg = ensemble.BaggingRegressor(baseRegressor, **self.baggingRegressorOpt)
-        if data_HR.shape[0] <= 1:
-            reg.max_samples = 1.0
-        reg = reg.fit(data_HR, np.ravel(data_LR), sample_weight=weight)
-
-        return {"reg": reg, "HR_scaler": HR_scaler, "LR_scaler": LR_scaler}
-
-    def _doPredict(self, inData, nn):
-        ''' Private function. Calls the neural network.
-        '''
-
-        reg = nn["reg"]
-        HR_scaler = nn["HR_scaler"]
-        LR_scaler = nn["LR_scaler"]
-
-        origShape = inData.shape
-        if len(origShape) == 3:
-            bands = origShape[2]
-        else:
-            bands = 1
-
-        # Do the actual neural network regression
-        inData = inData.reshape((-1, bands))
-        inData = HR_scaler.transform(inData)
-        outData = reg.predict(inData)
-        outData = LR_scaler.inverse_transform(outData)
-        outData = outData.reshape((origShape[0], origShape[1]))
-
-        return outData
 
 def downsample_dataset(x_array, y_array, w, subsample=10):
     n_cases = x_array.shape[0]

@@ -9,54 +9,59 @@ import time
 from osgeo import gdal
 
 import pyDMS.pyDMSUtils as utils
-from pyDMS.pyDMS import DecisionTreeSharpener, NeuralNetworkSharpener
-from pyDMS.pyDMS import REG_sklearn_ann
+from pyDMS.pyDMS import DecisionTreeSharpener, NeuralNetworkSharpener, SupportVectorSharpener
 
 highResFilename = r"./example/S2_20180802T105621_REFL.tif"
 lowResFilename = r"./example/S3_20180805T103824_LST.img"
-outputFilename = r"./example/DMS_RF_20180805T103824_LST.tif"
+outputFilename = r"./example/DMS_NN_20180805T103824_LST.tif"
 from sklearn.gaussian_process.kernels import RBF, WhiteKernel
 ##########################################################################################
 
 if __name__ == "__main__":
 
-    useDecisionTree = True
-
-    commonOpts = {"highResFiles":               [highResFilename],
+    commonOpts = {"method": "ann",
+                  "highResFiles":               [highResFilename],
                   "lowResFiles":                [lowResFilename],
                   "cvHomogeneityThreshold":     0,
-                  "movingWindowSize":           15,
-                  "disaggregatingTemperature":  True}
-    dtOpts =     {"method": "rf",
-                  "perLeafLinearRegression":    True,
+                  "movingWindowSize":           0,
+                  "disaggregatingTemperature":  True,
+                  "export_stats":               True,
+                  "perLeafLinearRegression":    False,
                   "linearRegressionExtrapolationRatio": 0.25,
                   "downsample": 5,
                   }
+
     ensembleOpts = {"n_jobs": 3,
                     "n_estimators": 10,
                     "bootstrap": False}
-    sknnOpts =   {'hidden_layer_sizes':         (10,),
-                  'activation':                 'tanh'}
-    nnOpts =     {"regressionType":             REG_sklearn_ann,
-                  "regressorOpt":               sknnOpts}
-    gprOpts =    {"regressorOpt": {"kernel": 1.0 * RBF(length_scale=1.0,
-                                      length_scale_bounds=(1e-3, 1e3))},
+
+    nnOpts =     {'hidden_layer_sizes':         (10,),
+                  'activation':                 'tanh',
+                  "max_iter":                   1000}
+
+    gprOpts =    {"kernel": 1.0 * RBF(length_scale=1.0,
+                                      length_scale_bounds=(1e-3, 1e3)),
                   "chunk_size":                 20000}
+
+    svrOpts =    {"n_jobs":                     7,
+                  "chunk_size":                 20000}
+
     start_time = time.time()
 
-    if useDecisionTree:
-        opts = commonOpts.copy()
-        opts.update(dtOpts)
-        if dtOpts["method"] == "gpr":
-            opts.update(gprOpts)
-        elif dtOpts["method"] == "rf":
-            opts["chunk_size"] = 20000
-        disaggregator = DecisionTreeSharpener(**opts, ensembleOpt=ensembleOpts)
-    else:
-        opts = commonOpts.copy()
-        opts.update(nnOpts)
-        disaggregator = NeuralNetworkSharpener(**opts)
+    opts = commonOpts.copy()
 
+    if opts["method"] == "gpr":
+        opts["chunk_size"] = gprOpts.pop("chunk_size")
+        opts["regressorOpt"] = gprOpts.copy()
+    elif opts["method"] == "rf":
+        opts["chunk_size"] = 20000
+    elif opts["method"] == "svr":
+        opts["chunk_size"] = svrOpts.pop("chunk_size")
+        opts["regressorOpt"] = svrOpts.copy()
+    else:
+        opts["regressorOpt"] = nnOpts.copy()
+
+    disaggregator = DecisionTreeSharpener(**opts, ensembleOpt=ensembleOpts)
     print("Training regressor...")
     disaggregator.trainSharpener()
     print("Sharpening...")
