@@ -10,12 +10,12 @@ from osgeo import gdal
 
 import pyDMS.pyDMSUtils as utils
 from pyDMS.pyDMS import DecisionTreeSharpener, NeuralNetworkSharpener
-from pyDMS.pyDMS import REG_sknn_ann, REG_sklearn_ann
+from pyDMS.pyDMS import REG_sklearn_ann
 
-highResFilename = r"C:\Users\pako\Downloads\s2reprojected30m-2.tif"
-lowResFilename = r"C:\Users\pako\Downloads\S3A_20170517T093144_Sobrino_lst_nadir_1km__fromNdvi_1km.tif"
-outputFilename = r"C:\Users\pako\output-rf-10.tif"
-
+highResFilename = r"./example/S2_20180802T105621_REFL.tif"
+lowResFilename = r"./example/S3_20180805T103824_LST.img"
+outputFilename = r"./example/DMS_RF_20180805T103824_LST.tif"
+from sklearn.gaussian_process.kernels import RBF, WhiteKernel
 ##########################################################################################
 
 if __name__ == "__main__":
@@ -25,23 +25,32 @@ if __name__ == "__main__":
     commonOpts = {"highResFiles":               [highResFilename],
                   "lowResFiles":                [lowResFilename],
                   "cvHomogeneityThreshold":     0,
-                  "movingWindowSize":           0,
+                  "movingWindowSize":           15,
                   "disaggregatingTemperature":  True}
     dtOpts =     {"method": "rf",
-                  "perLeafLinearRegression":    False,
-                  "linearRegressionExtrapolationRatio": 0.25}
-    ensembleOpts = {"n_jobs": 4,
-                    "n_estimators": 10}
+                  "perLeafLinearRegression":    True,
+                  "linearRegressionExtrapolationRatio": 0.25,
+                  "downsample": 5,
+                  }
+    ensembleOpts = {"n_jobs": 3,
+                    "n_estimators": 10,
+                    "bootstrap": False}
     sknnOpts =   {'hidden_layer_sizes':         (10,),
                   'activation':                 'tanh'}
     nnOpts =     {"regressionType":             REG_sklearn_ann,
                   "regressorOpt":               sknnOpts}
-
+    gprOpts =    {"regressorOpt": {"kernel": 1.0 * RBF(length_scale=1.0,
+                                      length_scale_bounds=(1e-3, 1e3))},
+                  "chunk_size":                 20000}
     start_time = time.time()
 
     if useDecisionTree:
         opts = commonOpts.copy()
         opts.update(dtOpts)
+        if dtOpts["method"] == "gpr":
+            opts.update(gprOpts)
+        elif dtOpts["method"] == "rf":
+            opts["chunk_size"] = 20000
         disaggregator = DecisionTreeSharpener(**opts, ensembleOpt=ensembleOpts)
     else:
         opts = commonOpts.copy()

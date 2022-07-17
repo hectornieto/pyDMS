@@ -10,45 +10,42 @@ import os
 import numpy as np
 from osgeo import gdal
 from sklearn import tree, linear_model, ensemble, preprocessing
-from sklearn.ensemble.forest import ForestRegressor
+from sklearn.ensemble import RandomForestRegressor
 import sklearn.neural_network as ann_sklearn
 import xgboost
 
-import pyDMS.pyDMSUtils as utils
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, WhiteKernel
+from sklearn.cluster import KMeans
+import pandas as pd
 
+import pyDMS.pyDMSUtils as utils
+from scipy import stats as st
 
 REG_sknn_ann = 0
 REG_sklearn_ann = 1
 
 
-class RandomForestRegressorWLLR(ForestRegressor):
+class RandomForestRegressorWLLR(RandomForestRegressor):
     def __init__(self,
                  n_estimators='warn',
-                 criterion="mse",
+                 criterion="squared_error",
                  max_depth=None,
                  min_samples_split=2,
                  min_samples_leaf=1,
                  min_weight_fraction_leaf=0.,
-                 max_features="auto",
+                 max_features=1.0,
                  max_leaf_nodes=None,
                  min_impurity_decrease=0.,
-                 min_impurity_split=None,
                  bootstrap=True,
                  oob_score=False,
                  n_jobs=None,
                  random_state=None,
                  verbose=0,
                  warm_start=False,
-                 base_estimator=tree.DecisionTreeRegressor()
                  ):
         super().__init__(
-            base_estimator=base_estimator,
             n_estimators=n_estimators,
-            estimator_params=("criterion", "max_depth", "min_samples_split",
-                              "min_samples_leaf", "min_weight_fraction_leaf",
-                              "max_features", "max_leaf_nodes",
-                              "min_impurity_decrease", "min_impurity_split",
-                              "random_state"),
             bootstrap=bootstrap,
             oob_score=oob_score,
             n_jobs=n_jobs,
@@ -64,7 +61,34 @@ class RandomForestRegressorWLLR(ForestRegressor):
         self.max_features = max_features
         self.max_leaf_nodes = max_leaf_nodes
         self.min_impurity_decrease = min_impurity_decrease
-        self.min_impurity_split = min_impurity_split
+
+
+class GaussianProcessRegressorWLLR(GaussianProcessRegressor):
+    def __init__(self,
+                 kernel=1.0 * RBF(length_scale=1e1,
+                                  length_scale_bounds=(1e-2, 1e4))\
+                                   + WhiteKernel(noise_level=1,
+                                   noise_level_bounds=(1e-5, 1e1)),
+                 alpha=1e-10,
+                 optimizer="fmin_l_bfgs_b",
+                 n_restarts_optimizer=0,
+                 normalize_y=True,
+                 copy_X_train=True,
+                 random_state=None,
+                 ):
+        super().__init__(
+            kernel=kernel,
+            alpha=alpha,
+            optimizer=optimizer,
+            n_restarts_optimizer=n_restarts_optimizer,
+            normalize_y=normalize_y,
+            copy_X_train=copy_X_train,
+            random_state=random_state)
+
+        self.kernel = kernel
+        self.alpha = alpha
+        self.optimizer = optimizer
+        self.normalize_y = normalize_y
 
 
 class DecisionTreeRegressorWithLinearLeafRegression(tree.DecisionTreeRegressor):
@@ -99,8 +123,6 @@ class DecisionTreeRegressorWithLinearLeafRegression(tree.DecisionTreeRegressor):
                  random_state=None,
                  max_leaf_nodes=None,
                  min_impurity_decrease=0.,
-                 min_impurity_split=None,
-                 presort=False,
                  linearRegressionExtrapolationRatio=0.25):
         super(DecisionTreeRegressorWithLinearLeafRegression, self).__init__(
             criterion=criterion,
@@ -113,8 +135,6 @@ class DecisionTreeRegressorWithLinearLeafRegression(tree.DecisionTreeRegressor):
             random_state=random_state,
             max_leaf_nodes=max_leaf_nodes,
             min_impurity_decrease=min_impurity_decrease,
-            min_impurity_split=min_impurity_split,
-            presort=presort
             )
         self.leafParameters = {}
         self.linearRegressionExtrapolationRatio = linearRegressionExtrapolationRatio
@@ -311,7 +331,9 @@ class DecisionTreeSharpener(object):
                  perLeafLinearRegression=True,
                  linearRegressionExtrapolationRatio=0.25,
                  regressorOpt={},
-                 ensembleOpt={}):
+                 ensembleOpt={},
+                 downsample=None,
+                 chunk_size=1e9):
 
         self.highResFiles = highResFiles
         self.lowResFiles = lowResFiles
@@ -358,11 +380,12 @@ class DecisionTreeSharpener(object):
         self.linearRegressionExtrapolationRatio = linearRegressionExtrapolationRatio
 
         # Chosen machine learning method
-        # Options: oneof ["dt", "rf", "xgb"]
+        # Options: oneof ["dt", "rf", "xgb", "gpr"]
         self.method = method
-
+        self.downsample = downsample
         self.regressorOpt = regressorOpt
         self.ensembleOpt = ensembleOpt
+        self.chunk_size = np.int64(chunk_size)
 
     def trainSharpener(self):
         ''' Train the sharpener using high- and low-resolution input files
@@ -582,7 +605,7 @@ class DecisionTreeSharpener(object):
 
         # Do the downscailing on the whole input image
         if self.reg[-1] is not None:
-            outFullData = self._doPredict(inData, self.reg[-1])
+            outFullData = self._doPredict(inData, self.reg[-1], chunk_size=self.chunk_size)
         else:
             outFullData = np.empty((ysize, xsize))*np.nan
 
@@ -718,42 +741,53 @@ class DecisionTreeSharpener(object):
 
         # For local regression constrain the number of tree
         # nodes (rules) - section 2.3
-        if local:
-            self.regressorOpt["max_leaf_nodes"] = 10
-        else:
-            self.regressorOpt["max_leaf_nodes"] = 30
-        self.regressorOpt["min_samples_leaf"] = 10
+        if self.method != "gpr":
+            if local:
+                self.regressorOpt["max_leaf_nodes"] = 10
+            else:
+                self.regressorOpt["max_leaf_nodes"] = 30
+            self.regressorOpt["min_samples_leaf"] = 10
 
         # If per leaf linear regression is used then use modified
         # DecisionTreeRegressor. Otherwise use the standard one.
-        if self.perLeafLinearRegression:
-            baseRegressor = \
-                DecisionTreeRegressorWithLinearLeafRegression(
-                    **self.regressorOpt,
-                    linearRegressionExtrapolationRatio=self.linearRegressionExtrapolationRatio
-                )
-        else:
-            baseRegressor = \
-                tree.DecisionTreeRegressor(**self.regressorOpt)
+        if self.downsample and not local:
+            goodData_HR, goodData_LR, weight = downsample_dataset_aboulalebi(goodData_HR,
+                                                                  goodData_LR,
+                                                                  weight,
+                                                                  self.downsample)     
         if self.method == "dt":
+            if self.perLeafLinearRegression:
+                baseRegressor = \
+                    DecisionTreeRegressorWithLinearLeafRegression(
+                        **self.regressorOpt,
+                        linearRegressionExtrapolationRatio=self.linearRegressionExtrapolationRatio
+                    )
+            else:
+                baseRegressor = tree.DecisionTreeRegressor(**self.regressorOpt)
+
             reg = ensemble.BaggingRegressor(baseRegressor, **self.ensembleOpt)
         elif self.method == "rf":
             reg = RandomForestRegressorWLLR(
-                base_estimator=baseRegressor,
                 **self.ensembleOpt,
                 **self.regressorOpt
                 )
         elif self.method == "xgb":
             reg = xgboost.XGBRegressor(**self.ensembleOpt)
+        elif self.method == "gpr":
+            reg = GaussianProcessRegressorWLLR(**self.regressorOpt)
+            reg = reg.fit(goodData_HR, goodData_LR)
+            return reg
+
         else:
-            raise TypeError("Method should be one of dt, rf or xgb")
+            raise TypeError("Method should be one of dt, rf, xgb or gpr")
         if goodData_HR.shape[0] <= 1:
             reg.max_samples = 1.0
+
         reg = reg.fit(goodData_HR, goodData_LR, sample_weight=weight)
 
         return reg
 
-    def _doPredict(self, inData, reg):
+    def _doPredict(self, inData, reg, chunk_size=50000):
         ''' Private function. Calls the regression tree.
         '''
 
@@ -764,7 +798,18 @@ class DecisionTreeSharpener(object):
             bands = 1
         # Do the actual decision tree regression
         inData = inData.reshape((-1, bands))
-        outData = reg.predict(inData)
+        if self.method == "gpr":
+            n_pixels = inData.shape[0]
+            outData = np.empty(inData.shape[0])
+            n_chunks = np.int(np.ceil(n_pixels / chunk_size))
+            for chunk in range(n_chunks):
+                ini = np.int(chunk * chunk_size)
+                end = np.int(np.minimum((chunk + 1) * chunk_size, n_pixels))
+                print(f"Predicting on chunk {chunk} out of {n_chunks}", end="\r")
+                outData[ini:end] = reg.predict(inData[ini:end, :])
+            print(f"Finished predicting on {n_pixels} cases", end="\n")
+        else:
+            outData = reg.predict(inData)
         outData = outData.reshape((origShape[0], origShape[1]))
 
         return outData
@@ -1020,3 +1065,63 @@ class NeuralNetworkSharpener(DecisionTreeSharpener):
         outData = outData.reshape((origShape[0], origShape[1]))
 
         return outData
+
+def downsample_dataset(x_array, y_array, w, subsample=10):
+    n_cases = x_array.shape[0]
+    upper = np.percentile(y_array, 100 - subsample / 2.)
+    lower = np.percentile(y_array, subsample / 2.)
+    to_downsample = np.logical_and(y_array > lower,
+                                   y_array < upper)
+    downsampled_x = x_array[to_downsample]
+    downsampled_y = y_array[to_downsample]
+    downsampled_w = w[to_downsample]
+    extreme_cases = np.sum(~to_downsample)
+    print(f"Downsample majority values to fit {extreme_cases} cases of extreme temperatures") 
+    sampling = np.random.uniform(size=np.sum(to_downsample))
+    sampling = sampling < subsample / 100.
+    print(f"Downsampled majority values to {np.sum(sampling)} cases")
+    x_array = np.append(x_array[~to_downsample], 
+                        downsampled_x[sampling], axis=0)
+            
+    y_array = np.append(y_array[~to_downsample], 
+                        downsampled_y[sampling], axis=0)
+    w = np.append(w[~to_downsample],
+                  downsampled_w[sampling], axis=0)
+    return x_array, y_array, w
+
+
+def downsample_dataset_aboulalebi(x_array, y_array, w,
+                                  n_clusters=5,
+                                  subsample=1,
+                                  p=2):
+    import matplotlib.pyplot as plt
+    n_cases = y_array.shape
+    sampling = np.random.uniform(size=np.sum(n_cases))
+    sampling = sampling <= subsample
+    x_array = x_array[sampling]
+    y_array = y_array[sampling]
+    # plt.figure()
+    # plt.hist(y_array, bins=n_clusters, histtype="step", color="b", density=True)
+    w = w[sampling]
+    clusters = KMeans(n_clusters=n_clusters).fit(np.concatenate([x_array,
+                                                                 y_array.reshape(-1, 1)],
+                                                                axis=1))
+
+    counts = np.unique(clusters.labels_, return_counts=True)[1]
+    n_min = np.min(counts)
+    for i in range(n_clusters):
+        cluster = clusters.labels_ == i
+        ids = np.argwhere(cluster).reshape(-1)
+        sampled = np.random.choice(ids, size=n_min, replace=False)
+        if i == 0:
+            sampled_x = x_array[sampled]
+            sampled_y = y_array[sampled]
+            sampled_w = w[sampled]
+        else:
+            sampled_x = np.append(sampled_x, x_array[sampled], axis=0)
+            sampled_y = np.append(sampled_y, y_array[sampled], axis=0)
+            sampled_w = np.append(sampled_w, w[sampled], axis=0)
+    print(f"Downsampled values to {np.size(sampled_y)} cases")
+    # plt.hist(sampled_y, bins=n_clusters, histtype="step", color="r", density=True)
+    # plt.show()
+    return sampled_x, sampled_y, sampled_w
