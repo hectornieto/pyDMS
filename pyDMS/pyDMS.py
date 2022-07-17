@@ -22,9 +22,6 @@ import pandas as pd
 import pyDMS.pyDMSUtils as utils
 from scipy import stats as st
 
-REG_sknn_ann = 0
-REG_sklearn_ann = 1
-
 
 class RandomForestRegressorWLLR(RandomForestRegressor):
     def __init__(self,
@@ -950,17 +947,10 @@ class NeuralNetworkSharpener(DecisionTreeSharpener):
         measurements it makes sense to average, while radiometric temperature
         behaviour is not linear.
 
-    regressionType: int (optional, default: 0)
-        Flag indicating whether scikit-neuralnetwork (flag value = REG_sknn_ann = 0)
-        or scikit-learn (flag value = REG_sklearn_ann = 1) implementations of
-        nearual network should be used. See
-        https://github.com/aigamedev/scikit-neuralnetwork and
-        http://scikit-learn.org/stable/modules/generated/sklearn.neural_network.MLPRegressor.html
-        for details.
-
     regressorOpt: dictionary (optional, default: {})
-        Options to pass to neural network regressor constructor See links in
-        regressionType parameter description for details.
+        Options to pass to neural network regressor constructor
+        See https://scikit-learn.org/stable/modules/generated/sklearn.neural_network.MLPRegressor.html
+        parameter description for details.
 
     baggingRegressorOpt: dictionary (optional, default: {})
         Options to pass to BaggingRegressor constructor. See
@@ -988,7 +978,6 @@ class NeuralNetworkSharpener(DecisionTreeSharpener):
                  cvHomogeneityThreshold=0.25,
                  movingWindowSize=0,
                  disaggregatingTemperature=False,
-                 regressionType=REG_sknn_ann,
                  regressorOpt={},
                  baggingRegressorOpt={}):
 
@@ -1001,11 +990,6 @@ class NeuralNetworkSharpener(DecisionTreeSharpener):
                                                      disaggregatingTemperature,
                                                      regressorOpt=regressorOpt,
                                                      baggingRegressorOpt=baggingRegressorOpt)
-        self.regressionType = regressionType
-        # Move the import of sknn here because this library is not easy to
-        # install but this shouldn't prevent the use of other parts of pyDMS.
-        if self.regressionType == REG_sknn_ann:
-            import sknn.mlp as ann_sknn
 
     def _doFit(self, goodData_LR, goodData_HR, weight, local):
         ''' Private function. Fits the neural network.
@@ -1018,20 +1002,7 @@ class NeuralNetworkSharpener(DecisionTreeSharpener):
         data_HR = HR_scaler.fit_transform(goodData_HR)
         LR_scaler = preprocessing.StandardScaler()
         data_LR = LR_scaler.fit_transform(goodData_LR.reshape(-1, 1))
-        if self.regressionType == REG_sknn_ann:
-            layers = []
-            if 'hidden_layer_sizes' in self.regressorOpt.keys():
-                for layer in self.regressorOpt['hidden_layer_sizes']:
-                    layers.append(ann_sknn.Layer(self.regressorOpt['activation'], units=layer))
-            else:
-                layers.append(ann_sknn.Layer(self.regressorOpt['activation'], units=100))
-            self.regressorOpt.pop('activation')
-            self.regressorOpt.pop('hidden_layer_sizes')
-            output_layer = ann_sknn.Layer('Linear', units=1)
-            layers.append(output_layer)
-            baseRegressor = ann_sknn.Regressor(layers, **self.regressorOpt)
-        else:
-            baseRegressor = ann_sklearn.MLPRegressor(**self.regressorOpt)
+        baseRegressor = ann_sklearn.MLPRegressor(**self.regressorOpt)
 
         # NN regressors do not support sample weights.
         weight = None
