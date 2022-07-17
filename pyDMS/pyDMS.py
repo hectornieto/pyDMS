@@ -891,6 +891,7 @@ class DecisionTreeSharpener(object):
             goodPixMask_LR = np.in1d(goodPixMask_LR.ravel(),
                                      self.lowResGoodQualityFlags).reshape(goodPixMask_LR.shape)
             data_LR[~goodPixMask_LR] = np.nan
+            del subsetQuality_LR
 
         # Then resample high res scene to low res pixel size
         if self.disaggregatingTemperature:
@@ -940,9 +941,7 @@ class DecisionTreeSharpener(object):
 
             residual = temp
 
-        del residualScene
         del subsetScene_LR
-        del subsetQuality_LR
 
         return residual, residual_LR, gt_LR
 
