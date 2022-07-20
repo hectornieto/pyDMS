@@ -13,8 +13,8 @@ from pyDMS.pyDMS import DecisionTreeSharpener, NeuralNetworkSharpener, SupportVe
 
 highResFilename = r"./example/S2_20180802T105621_REFL.tif"
 lowResFilename = r"./example/S3_20180805T103824_LST.img"
-outputFilename = r"./example/DMS_NN_20180805T103824_LST.tif"
-from sklearn.gaussian_process.kernels import RBF, WhiteKernel
+outputFilename = r"./example/DMS_ANN_20180805T103824_LST.tif"
+from sklearn.gaussian_process.kernels import RBF
 ##########################################################################################
 
 if __name__ == "__main__":
@@ -28,7 +28,7 @@ if __name__ == "__main__":
                   "export_stats":               True,
                   "perLeafLinearRegression":    False,
                   "linearRegressionExtrapolationRatio": 0.25,
-                  "downsample": 5,
+                  "downsample": None,
                   }
 
     ensembleOpts = {"n_jobs": 3,
@@ -37,14 +37,15 @@ if __name__ == "__main__":
 
     nnOpts =     {'hidden_layer_sizes':         (10,),
                   'activation':                 'tanh',
-                  "max_iter":                   1000}
+                  "max_iter":                   1000,
+                  "chunk_size":                 10000}
 
     gprOpts =    {"kernel": 1.0 * RBF(length_scale=1.0,
                                       length_scale_bounds=(1e-3, 1e3)),
                   "chunk_size":                 20000}
 
     svrOpts =    {"n_jobs":                     7,
-                  "chunk_size":                 20000}
+                  "chunk_size":                 10000}
 
     start_time = time.time()
 
@@ -58,7 +59,8 @@ if __name__ == "__main__":
     elif opts["method"] == "svr":
         opts["chunk_size"] = svrOpts.pop("chunk_size")
         opts["regressorOpt"] = svrOpts.copy()
-    else:
+    elif opts["method"] == "ann":
+        opts["chunk_size"] = nnOpts.pop("chunk_size")	
         opts["regressorOpt"] = nnOpts.copy()
 
     disaggregator = DecisionTreeSharpener(**opts, ensembleOpt=ensembleOpts)
