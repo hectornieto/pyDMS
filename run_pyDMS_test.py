@@ -10,16 +10,16 @@ from osgeo import gdal
 
 import pyDMS.pyDMSUtils as utils
 from pyDMS.pyDMS import DecisionTreeSharpener, NeuralNetworkSharpener, SupportVectorSharpener
+from sklearn.gaussian_process.kernels import RBF
 
 highResFilename = r"./example/S2_20180802T105621_REFL.tif"
 lowResFilename = r"./example/S3_20180805T103824_LST.img"
 outputFilename = r"./example/DMS_ANN_20180805T103824_LST.tif"
-from sklearn.gaussian_process.kernels import RBF
 ##########################################################################################
 
 if __name__ == "__main__":
 
-    commonOpts = {"method": "ann",
+    commonOpts = {"method": "ann", # choose between ann, rf, xbg, dt, svr o gpr
                   "highResFiles":               [highResFilename],
                   "lowResFiles":                [lowResFilename],
                   "cvHomogeneityThreshold":     0,
@@ -54,8 +54,6 @@ if __name__ == "__main__":
     if opts["method"] == "gpr":
         opts["chunk_size"] = gprOpts.pop("chunk_size")
         opts["regressorOpt"] = gprOpts.copy()
-    elif opts["method"] == "rf":
-        opts["chunk_size"] = 20000
     elif opts["method"] == "svr":
         opts["chunk_size"] = svrOpts.pop("chunk_size")
         opts["regressorOpt"] = svrOpts.copy()
