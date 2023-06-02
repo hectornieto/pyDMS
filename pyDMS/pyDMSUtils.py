@@ -248,7 +248,7 @@ def resampleHighResToLowRes(highResScene, lowResScene):
             _resampleHighResToLowRes(bandData_HR, ySize_LR, yRes_LR, yRes_HR, xSize_LR, xRes_LR,
                                      xRes_HR, gt_HR, gt_LR)
     if close:
-        highRes = None
+        del highRes
     return aggregatedMean, aggregatedStd
 
 
