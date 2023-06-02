@@ -738,9 +738,6 @@ class DecisionTreeSharpener(object):
         # Fuction below fixes this. Image border pixels are excluded due to numba stencil
         # limitations.
         residual[1:-1, 1:-1] = utils.removeEdgeNaNs(residual)[1:-1, 1:-1]
-        del residualScene_BL
-        residual[np.isnan(residualScene_NN.GetRasterBand(1).ReadAsArray())] = np.NaN
-        del residualScene_NN, residualScene_BL
 
         # The residual array might be slightly smaller then the downscaled because
         # of the subsetting of the low resolution scene. In that case just pad
