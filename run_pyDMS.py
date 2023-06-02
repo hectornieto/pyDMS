@@ -43,7 +43,7 @@ if __name__ == "__main__":
     rfOpts =     {"n_estimators": 100,
                   "max_samples": 0.8,
                   "max_features": 0.8,
-                  "n_jobs": 3}
+                  "n_jobs": -1}
 
 
     start_time = time.time()
@@ -88,9 +88,9 @@ if __name__ == "__main__":
                                  os.path.splitext(outputFilename)[0] + "_residual" +
                                  os.path.splitext(outputFilename)[1])
 
-    outFile = None
-    residualFile = None
-    downsaceldFile = None
-    highResFile = None
+    del outFile
+    del residualFile
+    del downscaledFile
+    del highResFile
 
     print(time.time() - start_time, "seconds")
