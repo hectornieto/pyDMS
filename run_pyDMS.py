@@ -9,42 +9,59 @@ import time
 from osgeo import gdal
 
 import pyDMS.pyDMSUtils as utils
-from pyDMS.pyDMS import DecisionTreeSharpener, NeuralNetworkSharpener
+from pyDMS.pyDMS import DecisionTreeSharpener, NeuralNetworkSharpener, RandomForestSharpener
 
-highResFilename = r""
-lowResFilename = r""
+highResFilename = r"./example/S2_20180802T105621_REFL.tif"
+lowResFilename = r"./example/S3_20180805T103824_LST.img"
 lowResMaskFilename = r""
-outputFilename = r""
-
+outputFilename = r"./example/test_20180805T103824_DMS.tif"
+method = "rf"
 ##########################################################################################
 
 if __name__ == "__main__":
 
-    useDecisionTree = True
-
     commonOpts = {"highResFiles":               [highResFilename],
                   "lowResFiles":                [lowResFilename],
-                  "lowResQualityFiles":         [lowResMaskFilename],
-                  "lowResGoodQualityFlags":     [255],
                   "cvHomogeneityThreshold":     0,
                   "movingWindowSize":           15,
-                  "disaggregatingTemperature":  True}
-    dtOpts =     {"perLeafLinearRegression":    True,
-                  "linearRegressionExtrapolationRatio": 0.25}
-    sknnOpts =   {'hidden_layer_sizes':         (10,),
-                  'activation':                 'tanh'}
-    nnOpts =     {"regressorOpt":               sknnOpts}
+                  "disaggregatingTemperature":  True,
+                  "perLeafLinearRegression":    False,
+                  "linearRegressionExtrapolationRatio": 0.25,
+                  }
+    dtOpts = {"perLeafLinearRegression": True,
+              "linearRegressionExtrapolationRatio": 0.25}
+
+    ensembleOpts = {"n_jobs": 3,
+                    "n_estimators": 10,
+                    "bootstrap": False}
+
+    nnOpts =     {'hidden_layer_sizes':         (10,),
+                  'activation':                 'tanh',
+                  "max_iter":                   1000,
+                  "chunk_size":                 10000}
+
+    rfOpts =     {"n_estimators": 100,
+                  "max_samples": 0.8,
+                  "max_features": 0.8,
+                  "n_jobs": 3}
+
 
     start_time = time.time()
 
-    if useDecisionTree:
-        opts = commonOpts.copy()
-        opts.update(dtOpts)
-        disaggregator = DecisionTreeSharpener(**opts)
-    else:
-        opts = commonOpts.copy()
-        opts.update(nnOpts)
+    opts = commonOpts.copy()
+
+    if method == "rf":
+        opts["regressorOpt"] = rfOpts.copy()
+        disaggregator = RandomForestSharpener(**opts)
+
+    elif method == "ann":
+        opts["chunk_size"] = nnOpts.pop("chunk_size")	
+        opts["regressorOpt"] = nnOpts.copy()
         disaggregator = NeuralNetworkSharpener(**opts)
+    else:
+        opts["regressorOpt"] = dtOpts.copy()
+        disaggregator = DecisionTreeSharpener(**opts)
+
 
     print("Training regressor...")
     disaggregator.trainSharpener()
