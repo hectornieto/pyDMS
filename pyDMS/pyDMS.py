@@ -1093,7 +1093,7 @@ class RandomForestSharpener(DecisionTreeSharpener):
         # Do the actual neural network regression
         inData = inData.reshape((-1, bands))
         inData = HR_scaler.transform(inData)
-        outData = reg.predict(inData)
+        outData = reg.predict(inData).reshape(-1, 1)
         outData = LR_scaler.inverse_transform(outData)
         outData = outData.reshape((origShape[0], origShape[1]))
 
