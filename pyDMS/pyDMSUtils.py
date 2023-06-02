@@ -9,7 +9,6 @@ import os
 
 import numpy as np
 import scipy.ndimage as ndi
-from numba import njit, stencil
 
 from osgeo import gdal
 
@@ -240,7 +239,6 @@ def resampleHighResToLowRes(highResScene, lowResScene):
     return aggregatedMean, aggregatedStd
 
 
-@njit
 def _resampleHighResToLowRes(bandData_HR, ySize_LR, yRes_LR, yRes_HR, xSize_LR, xRes_LR, xRes_HR,
                              gt_HR, gt_LR):
     aggregatedMean = np.zeros((ySize_LR, xSize_LR))
@@ -261,7 +259,6 @@ def _resampleHighResToLowRes(bandData_HR, ySize_LR, yRes_LR, yRes_HR, xSize_LR, 
     return aggregatedMean, aggregatedStd
 
 
-@stencil(cval=1.0)
 def removeEdgeNaNs(a):
     if np.isnan(a[0, 0]) and (not np.isnan(a[-1, 0]) or not np.isnan(a[1, 0]) or
                               not np.isnan(a[0, -1]) or not np.isnan(a[0, 1])):
