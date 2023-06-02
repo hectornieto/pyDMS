@@ -118,7 +118,7 @@ def saveImg(data, geotransform, proj, outPath, noDataValue=None, fieldNames=[]):
             is_netCDF = False
         else:
             fileFormat = "GTiff"
-            driverOpt = ['COMPRESS=DEFLATE', 'PREDICTOR=1', 'BIGTIFF=IF_SAFER']
+            driverOpt = ['COMPRESS=LZW', 'PREDICTOR=2', 'BIGTIFF=IF_SAFER']
             is_netCDF = False            
         out_ds = gdal.Translate(outPath, ds, format=fileFormat, creationOptions=driverOpt,
                                 noData=noDataValue, stats=True)
@@ -126,7 +126,7 @@ def saveImg(data, geotransform, proj, outPath, noDataValue=None, fieldNames=[]):
         if out_ds is None:
             print("Warning: Selected GDAL driver is not supported! Saving as GeoTiff!")
             fileFormat = "GTiff"
-            driverOpt = ['COMPRESS=DEFLATE', 'PREDICTOR=1', 'BIGTIFF=IF_SAFER']
+            driverOpt = ['COMPRESS=LZW', 'PREDICTOR=2', 'BIGTIFF=IF_SAFER']
             is_netCDF = False
             ds = gdal.Translate(outPath, ds, format=fileFormat, creationOptions=driverOpt,
                                 noData=noDataValue, stats=True)
@@ -189,7 +189,6 @@ def appendNpArray(array, data, axis=None):
 # Reproject and subset the given low resolution datasets to high resolution
 # scene projection and extent
 def reprojectSubsetLowResScene(highResScene, lowResScene,
-                               resampleAlg=gdal.GRA_Bilinear,
                                warp_options=None):
 
     # Read the required metadata
@@ -212,50 +211,25 @@ def reprojectSubsetLowResScene(highResScene, lowResScene,
     # the new projection
     UL_x, UL_y = transformer.transform(gt_LR[0], gt_LR[3])
     gt_LR = [UL_x, xRes_LR_proj, 0, UL_y, 0, yRes_LR_proj]
-    if warp_options is None:
-        warp_options = {"multithread": True,
-                        "warpOptions": ["NUM_THREADS=%i"%mp.cpu_count()]}
 
+    # Now subset to high resolution scene extent while not shifting pixels
     UL = pix2point(point2pix([extent[0], extent[3]], gt_LR, upperBound=False), gt_LR)
     BR = pix2point(point2pix([extent[2], extent[1]], gt_LR, upperBound=True), gt_LR)
 
     if warp_options is None:
         warp_options = {"multithread": True,
                         "warpOptions": ["NUM_THREADS=%i"%mp.cpu_count()]}
-    # Reproject low res scene to high res scene's projection to get the original
-    # pixel size in the new projection
     out = gdal.Warp("",
-                    lowResScene.GetDescription(),
+                    openRaster(lowResScene)[0],
                     format="MEM",
                     dstSRS=proj_HR,
                     resampleAlg=gdal.GRA_NearestNeighbour,
+                    xRes=gt_LR[1],
+                    yRes=gt_LR[5],
+                    outputBounds=[UL[0], BR[1], BR[0], UL[1]],
                     **warp_options)
 
-    # Make the new LR pixel as close as possible to original low resolution while
-    # overlapping nicely with the high resolution pixels
-    gt_LR = out.GetGeoTransform()
-    pixSize_HR = [gt_HR[1], math.fabs(gt_HR[5])]
-    pixSize_LR = [round(gt_LR[1]/pixSize_HR[0])*pixSize_HR[0],
-                  round(math.fabs(gt_LR[5])/pixSize_HR[0])*pixSize_HR[0]]
-    out = None
-
-    # Make the extent such that it does not go outside high resolution extent so that the matrix
-    # is the same size as resampled high resolution reflectances in the next step
-    UL = [gt_HR[0], gt_HR[3]]
-    xsize_LR = int((xsize_HR*pixSize_HR[0])/pixSize_LR[0])
-    ysize_LR = int((ysize_HR*pixSize_HR[1])/pixSize_LR[1])
-    BR = [UL[0] + xsize_LR*pixSize_LR[0], UL[1] - ysize_LR*pixSize_LR[1]]
-
-    # Call GDAL warp to reproject and subsset low resolution scene
-    out = gdal.Warp("",
-                    lowResScene.GetDescription(),
-                    format="MEM",
-                    dstSRS=proj_HR,
-                    resampleAlg=resampleAlg,
-                    outputBounds=[UL[0], BR[1], BR[0], UL[1]])
-
     return out
-
 
 # Resample high res scene to low res pixel while extracting homogeneity
 # statistics. It is assumed that both scenes have the same projection and extent.
@@ -285,7 +259,7 @@ def resampleHighResToLowRes(highResScene, lowResScene):
             _resampleHighResToLowRes(bandData_HR, ySize_LR, yRes_LR, yRes_HR, xSize_LR, xRes_LR,
                                      xRes_HR, gt_HR, gt_LR)
     if close:
-        highRes = None
+        del highRes
     return aggregatedMean, aggregatedStd
 
 
