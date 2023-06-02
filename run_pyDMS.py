@@ -10,7 +10,6 @@ from osgeo import gdal
 
 import pyDMS.pyDMSUtils as utils
 from pyDMS.pyDMS import DecisionTreeSharpener, NeuralNetworkSharpener
-from pyDMS.pyDMS import REG_sknn_ann, REG_sklearn_ann
 
 highResFilename = r""
 lowResFilename = r""
@@ -34,8 +33,7 @@ if __name__ == "__main__":
                   "linearRegressionExtrapolationRatio": 0.25}
     sknnOpts =   {'hidden_layer_sizes':         (10,),
                   'activation':                 'tanh'}
-    nnOpts =     {"regressionType":             REG_sklearn_ann,
-                  "regressorOpt":               sknnOpts}
+    nnOpts =     {"regressorOpt":               sknnOpts}
 
     start_time = time.time()
 
