@@ -13,6 +13,7 @@ import scipy.ndimage as ndi
 from osgeo import gdal
 from pyproj import Proj, Transformer
 import multiprocessing as mp
+from numba import njit, stencil
 
 def openRaster(raster):
     closeOnExit = False
@@ -189,6 +190,7 @@ def appendNpArray(array, data, axis=None):
 # Reproject and subset the given low resolution datasets to high resolution
 # scene projection and extent
 def reprojectSubsetLowResScene(highResScene, lowResScene,
+                               resampleAlg=gdal.GRA_NearestNeighbour,
                                warp_options=None):
 
     # Read the required metadata
@@ -223,7 +225,7 @@ def reprojectSubsetLowResScene(highResScene, lowResScene,
                     openRaster(lowResScene)[0],
                     format="MEM",
                     dstSRS=proj_HR,
-                    resampleAlg=gdal.GRA_NearestNeighbour,
+                    resampleAlg=resampleAlg,
                     xRes=gt_LR[1],
                     yRes=gt_LR[5],
                     outputBounds=[UL[0], BR[1], BR[0], UL[1]],
@@ -252,7 +254,7 @@ def resampleHighResToLowRes(highResScene, lowResScene):
     # deviation when aggregated to the low resolution
     highRes, close = openRaster(highResScene)
     for band in range(bands_HR):
-        bandData_HR = highRes.GetRasterBand(band+1).ReadAsArray().astype(np.float32)
+        bandData_HR = highRes.GetRasterBand(band+1).ReadAsArray().astype(float)
         nodataValue = highRes.GetRasterBand(1).GetNoDataValue()
         bandData_HR[bandData_HR == nodataValue] = np.nan
         aggregatedMean[:, :, band], aggregatedStd[:, :, band] =\
@@ -262,9 +264,10 @@ def resampleHighResToLowRes(highResScene, lowResScene):
         del highRes
     return aggregatedMean, aggregatedStd
 
-
+@njit
 def _resampleHighResToLowRes(bandData_HR, ySize_LR, yRes_LR, yRes_HR, xSize_LR, xRes_LR, xRes_HR,
                              gt_HR, gt_LR):
+
     aggregatedMean = np.zeros((ySize_LR, xSize_LR))
     aggregatedStd = np.zeros((ySize_LR, xSize_LR))
     for yPix_LR in range(ySize_LR):
@@ -282,7 +285,7 @@ def _resampleHighResToLowRes(bandData_HR, ySize_LR, yRes_LR, yRes_HR, xSize_LR, 
 
     return aggregatedMean, aggregatedStd
 
-
+@stencil(cval=1.0)
 def removeEdgeNaNs(a):
     if np.isnan(a[0, 0]) and (not np.isnan(a[-1, 0]) or not np.isnan(a[1, 0]) or
                               not np.isnan(a[0, -1]) or not np.isnan(a[0, 1])):
