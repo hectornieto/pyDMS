@@ -258,10 +258,10 @@ class DecisionTreeSharpener(object):
 
         self.cvHomogeneityThreshold = cvHomogeneityThreshold
         # If threshold is 0 or negative then it is set automatically such that
-        # 80% of pixels are below it.
+        # abs(cvHomogeneityThreshold)% of pixels are excluded.
         if self.cvHomogeneityThreshold <= 0:
             self.autoAdjustCvThreshold = True
-            self.precentileThreshold = 80
+            self.precentileThreshold = 100 + self.cvHomogeneityThreshold
         else:
             self.autoAdjustCvThreshold = False
 
