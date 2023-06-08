@@ -733,6 +733,7 @@ class DecisionTreeSharpener(object):
         del residualDs
 
         residual = residualScene_BL.GetRasterBand(1).ReadAsArray()
+        del residualScene_BL
 
         # Sometimes there can be 1 HR pixel NaN border arond LR invalid pixels due to resampling.
         # Fuction below fixes this. Image border pixels are excluded due to numba stencil
