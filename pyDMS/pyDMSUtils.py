@@ -34,7 +34,7 @@ def getRasterInfo(raster):
     extent = [gt[0], gt[3]+gt[5]*sizeY, gt[0]+gt[1]*sizeX, gt[3]]
     bands = r.RasterCount
     if closeOnExit:
-        r = None
+        del r
     return proj, gt, sizeX, sizeY, extent, bands
 
 
