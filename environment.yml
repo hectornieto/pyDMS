@@ -1,0 +1,11 @@
+channels:
+  - default
+  - conda-forge
+ 
+dependencies:
+  - numpy
+  - gdal>=3.0.0
+  - scipy
+  - scikit-learn
+  - numba
+  - pyproj>2.2.0
