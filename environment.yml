@@ -9,3 +9,6 @@ dependencies:
   - scikit-learn
   - numba
   - pyproj>2.2.0
+  - pip
+  - pip:
+    - cubist

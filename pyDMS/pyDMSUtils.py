@@ -9,11 +9,11 @@ import os
 
 import numpy as np
 import scipy.ndimage as ndi
+from numba import njit, stencil
 
 from osgeo import gdal
 from pyproj import Proj, Transformer
-import multiprocessing as mp
-from numba import njit, stencil
+
 
 def openRaster(raster):
     closeOnExit = False
@@ -40,26 +40,19 @@ def getRasterInfo(raster):
 
 
 def resampleWithGdalWarp(srcFile, templateFile, outFile="", outFormat="MEM",
-                         resampleAlg="average", warp_options=None):
+                         resampleAlg="average"):
     # Get template projection, extent and resolution
     proj, gt, sizeX, sizeY, extent, _ = getRasterInfo(templateFile)
-    if warp_options is None:
-        warp_options = {"multithread": True,
-                        "warpOptions": ["NUM_THREADS=%i"%mp.cpu_count()]}
+
     # Resample with GDAL warp
-    fid, close_on_exit = openRaster(srcFile)
     outDs = gdal.Warp(str(outFile),
-                      fid,
+                      openRaster(srcFile)[0],
                       format=outFormat,
                       dstSRS=proj,
                       xRes=gt[1],
                       yRes=gt[5],
                       outputBounds=extent,
-                      resampleAlg=resampleAlg,
-                      **warp_options)
-
-    if close_on_exit:
-        del fid
+                      resampleAlg=resampleAlg)
 
     return outDs
 
@@ -117,21 +110,16 @@ def saveImg(data, geotransform, proj, outPath, noDataValue=None, fieldNames=[]):
             fileFormat = "netCDF"
             driverOpt = ["FORMAT=NC2"]
             is_netCDF = True
-        if ext.lower() == ".cog":
+        else:
             fileFormat = "COG"
             driverOpt = ['COMPRESS=DEFLATE', 'PREDICTOR=YES', 'BIGTIFF=IF_SAFER']
-            is_netCDF = False
-        else:
-            fileFormat = "GTiff"
-            driverOpt = ['COMPRESS=LZW', 'PREDICTOR=2', 'BIGTIFF=IF_SAFER']
-            is_netCDF = False            
         out_ds = gdal.Translate(outPath, ds, format=fileFormat, creationOptions=driverOpt,
                                 noData=noDataValue, stats=True)
         # If GDAL driers for other formats do not exist then default to GeoTiff
         if out_ds is None:
             print("Warning: Selected GDAL driver is not supported! Saving as GeoTiff!")
             fileFormat = "GTiff"
-            driverOpt = ['COMPRESS=LZW', 'PREDICTOR=2', 'BIGTIFF=IF_SAFER']
+            driverOpt = ['COMPRESS=DEFLATE', 'PREDICTOR=1', 'BIGTIFF=IF_SAFER']
             is_netCDF = False
             ds = gdal.Translate(outPath, ds, format=fileFormat, creationOptions=driverOpt,
                                 noData=noDataValue, stats=True)
@@ -152,8 +140,7 @@ def saveImg(data, geotransform, proj, outPath, noDataValue=None, fieldNames=[]):
             ds.close()
             ds = gdal.Open('NETCDF:"'+outPath+'":'+fieldNames[0])
 
-    if outPath != "MEM":
-        print('Saved ' + outPath)
+    print('Saved ' + outPath)
 
     return ds
 
@@ -193,9 +180,7 @@ def appendNpArray(array, data, axis=None):
 
 # Reproject and subset the given low resolution datasets to high resolution
 # scene projection and extent
-def reprojectSubsetLowResScene(highResScene, lowResScene,
-                               resampleAlg=gdal.GRA_NearestNeighbour,
-                               warp_options=None):
+def reprojectSubsetLowResScene(highResScene, lowResScene, resampleAlg=gdal.GRA_Bilinear):
 
     # Read the required metadata
     proj_HR, gt_HR, xsize_HR, ysize_HR, extent = getRasterInfo(highResScene)[0:5]
@@ -221,21 +206,17 @@ def reprojectSubsetLowResScene(highResScene, lowResScene,
     # Now subset to high resolution scene extent while not shifting pixels
     UL = pix2point(point2pix([extent[0], extent[3]], gt_LR, upperBound=False), gt_LR)
     BR = pix2point(point2pix([extent[2], extent[1]], gt_LR, upperBound=True), gt_LR)
-
-    if warp_options is None:
-        warp_options = {"multithread": True,
-                        "warpOptions": ["NUM_THREADS=%i"%mp.cpu_count()]}
     out = gdal.Warp("",
                     openRaster(lowResScene)[0],
                     format="MEM",
                     dstSRS=proj_HR,
-                    resampleAlg=resampleAlg,
+                    resampleAlg=gdal.GRA_NearestNeighbour,
                     xRes=gt_LR[1],
                     yRes=gt_LR[5],
-                    outputBounds=[UL[0], BR[1], BR[0], UL[1]],
-                    **warp_options)
+                    outputBounds=[UL[0], BR[1], BR[0], UL[1]])
 
     return out
+
 
 # Resample high res scene to low res pixel while extracting homogeneity
 # statistics. It is assumed that both scenes have the same projection and extent.
@@ -258,7 +239,7 @@ def resampleHighResToLowRes(highResScene, lowResScene):
     # deviation when aggregated to the low resolution
     highRes, close = openRaster(highResScene)
     for band in range(bands_HR):
-        bandData_HR = highRes.GetRasterBand(band+1).ReadAsArray().astype(float)
+        bandData_HR = highRes.GetRasterBand(band+1).ReadAsArray().astype(np.float32)
         nodataValue = highRes.GetRasterBand(1).GetNoDataValue()
         bandData_HR[bandData_HR == nodataValue] = np.nan
         aggregatedMean[:, :, band], aggregatedStd[:, :, band] =\
@@ -268,10 +249,10 @@ def resampleHighResToLowRes(highResScene, lowResScene):
         del highRes
     return aggregatedMean, aggregatedStd
 
+
 @njit
 def _resampleHighResToLowRes(bandData_HR, ySize_LR, yRes_LR, yRes_HR, xSize_LR, xRes_LR, xRes_HR,
                              gt_HR, gt_LR):
-
     aggregatedMean = np.zeros((ySize_LR, xSize_LR))
     aggregatedStd = np.zeros((ySize_LR, xSize_LR))
     for yPix_LR in range(ySize_LR):
@@ -288,6 +269,29 @@ def _resampleHighResToLowRes(bandData_HR, ySize_LR, yRes_LR, yRes_HR, xSize_LR, 
                 np.nanstd(bandData_HR[yPix_HR_min:yPix_HR_max, xPix_HR_min:xPix_HR_max])
 
     return aggregatedMean, aggregatedStd
+
+
+def resampleLowResToHighRes(lowResScene, highResScene, resampleAlg="cubic"):
+
+    lowResScene_resampled = resampleWithGdalWarp(lowResScene, highResScene,
+                                                 resampleAlg=resampleAlg)
+
+    data = lowResScene_resampled.GetRasterBand(1).ReadAsArray()
+    # Sometimes there can be 1 HR pixel NaN border arond LR invalid pixels due to resampling.
+    # Fuction below fixes this. Image border pixels are excluded due to numba stencil
+    # limitations.
+    data[1:-1, 1:-1] = removeEdgeNaNs(data)[1:-1, 1:-1]
+
+    # The resampled array might be slightly smaller then the high-res because
+    # of the subsetting of the low resolution scene. In that case just pad
+    # the missing values with neighbours.
+    highResShape = (getRasterInfo(highResScene)[3], getRasterInfo(highResScene)[2])
+    if highResShape != data.shape:
+        data = np.pad(data,
+                      ((0, highResShape[0]-data.shape[0]), (0, highResShape[1]-data.shape[1])),
+                      "edge")
+    return data
+
 
 @stencil(cval=1.0)
 def removeEdgeNaNs(a):
