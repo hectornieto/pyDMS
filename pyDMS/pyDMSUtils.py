@@ -45,8 +45,9 @@ def resampleWithGdalWarp(srcFile, templateFile, outFile="", outFormat="MEM",
     proj, gt, sizeX, sizeY, extent, _ = getRasterInfo(templateFile)
 
     # Resample with GDAL warp
+    fid, close_on_exit = openRaster(srcFile)
     outDs = gdal.Warp(str(outFile),
-                      openRaster(srcFile)[0],
+                      fid,
                       format=outFormat,
                       dstSRS=proj,
                       xRes=gt[1],
@@ -55,6 +56,9 @@ def resampleWithGdalWarp(srcFile, templateFile, outFile="", outFormat="MEM",
                       resampleAlg=resampleAlg,
                       multithread=multithread,
                       warpOptions={"NUM_THREADS": "ALL_CPUS"})
+
+    if close_on_exit:
+        del fid
 
     return outDs
 
