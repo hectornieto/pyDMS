@@ -965,6 +965,7 @@ class NeuralNetworkSharpener(DecisionTreeSharpener):
         The number of samples requried to train a regression model. Applicable both to local and
         global regressions.
 
+<<<<<<< HEAD
     disaggregatingTemperature: boolean (optional, default: False)
         Flag indicating whether the parameter to be disaggregated is
         temperature (e.g. land surface temperature). If that is the case then
@@ -1173,7 +1174,7 @@ class RandomForestSharpener(DecisionTreeSharpener):
     ----------
     .. [Gao2012] Gao, F., Kustas, W. P., & Anderson, M. C. (2012). A Data
        Mining Approach for Sharpening Thermal Satellite Imagery over Land.
-       Remote Sensing, 4(11), 3287–3319. https://doi.org/10.3390/rs4113287
+       Remote Sensing, 4(11), 3287-3319. https://doi.org/10.3390/rs4113287
     '''
 
     def __init__(self,
