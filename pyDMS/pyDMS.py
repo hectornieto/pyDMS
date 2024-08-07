@@ -754,7 +754,7 @@ class DecisionTreeSharpener(object):
 
             residual = temp
 
-        del subsetScene_LR
+        del subsetScene_LR, downscaledScene
 
         return residual, residual_LR, gt_LR
 
