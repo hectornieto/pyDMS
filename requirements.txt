@@ -5,3 +5,4 @@ scipy
 pyproj>2.2.0
 numba
 cubist
+scikit-learn-intelex

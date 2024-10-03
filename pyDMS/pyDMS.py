@@ -10,6 +10,8 @@ from multiprocessing import Pool
 
 import numpy as np
 from osgeo import gdal
+from sklearnex import patch_sklearn
+patch_sklearn()
 from sklearn import tree, linear_model, ensemble, preprocessing
 import sklearn.neural_network as ann_sklearn
 
