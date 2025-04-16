@@ -1199,22 +1199,17 @@ class RandomForestSharpener(DecisionTreeSharpener):
         else:
             reg = \
                 ensemble.RandomForestRegressor(**self.regressorOpt)
-        # reg = ensemble.RandomForestRegressor(**self.regressorOpt)
 
         reg = reg.fit(data_HR, np.ravel(data_LR), sample_weight=weight)
         if data_HR.shape[0] <= 1:
             reg.max_samples = 1.0
 
-        return {"reg": reg, "HR_scaler": HR_scaler, "LR_scaler": LR_scaler}
+        return reg
 
 
-    def _doPredict(self, inData, nn):
-        ''' Private function. Calls the neural network.
+    def _doPredict(self, inData, reg):
+        ''' Private function. Calls the Random Forest.
         '''
-
-        reg = nn["reg"]
-        HR_scaler = nn["HR_scaler"]
-        LR_scaler = nn["LR_scaler"]
 
         origShape = inData.shape
         if len(origShape) == 3:
@@ -1224,9 +1219,7 @@ class RandomForestSharpener(DecisionTreeSharpener):
 
         # Do the actual neural network regression
         inData = inData.reshape((-1, bands))
-        inData = HR_scaler.transform(inData)
         outData = reg.predict(inData).reshape(-1, 1)
-        outData = LR_scaler.inverse_transform(outData)
         outData = outData.reshape((origShape[0], origShape[1]))
 
         return outData
@@ -1296,7 +1289,8 @@ class RandomForestRegressorWithLinearLeafRegression(ensemble.RandomForestRegress
             # Create a linear regression for all input points which fall into
             # one output leaf
             predictedValues = super(RandomForestRegressorWithLinearLeafRegression, self).predict(X)
-            leafValues = np.unique(predictedValues)
+            valid = np.isfinite(predictedValues)
+            leafValues = np.unique(predictedValues[valid])
 
             for value in leafValues:
                 ind = predictedValues == value
