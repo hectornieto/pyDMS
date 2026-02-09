@@ -1207,7 +1207,7 @@ class RandomForestSharpener(DecisionTreeSharpener):
                 ensemble.RandomForestRegressor(**self.regressorOpt)
 
         reg = reg.fit(goodData_HR, np.ravel(goodData_LR), sample_weight=weight)
-        if data_HR.shape[0] <= 1:
+        if goodData_HR.shape[0] <= 1:
             reg.max_samples = 1.0
 
         return reg
