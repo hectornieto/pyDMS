@@ -1070,3 +1070,281 @@ class NeuralNetworkSharpener(DecisionTreeSharpener):
         outData = outData.reshape((origShape[0], origShape[1]))
 
         return outData
+
+
+class RandomForestSharpener(DecisionTreeSharpener):
+    ''' Random Forest based sharpening (disaggregation) of low-resolution
+    images using high-resolution images. The implementation is mostly based on [Gao2012] as
+    implemented in DescisionTreeSharpener except that Decision Tree regressor is replaced by
+    Neural Network regressor.
+
+    Nerual network based regressor is trained with high-resolution data resampled to
+    low resolution and low-resolution data and then applied
+    directly to high-resolution data to obtain high-resolution representation
+    of the low-resolution data.
+
+    The implementation includes selecting training data based on homogeneity
+    statistics and using the homogeneity as weight factor ([Gao2012], section 2.2),
+    performing linear regression with samples located within each regression
+    tree leaf node ([Gao2012], section 2.1), using an ensemble of regression trees
+    ([Gao2012], section 2.1), performing local (moving window) and global regression and
+    combining them based on residuals ([Gao2012] section 2.3) and performing residual
+    analysis and bias correction ([Gao2012], section 2.4)
+
+    Parameters
+    ----------
+    highResFiles: list of strings
+        A list of file paths to high-resolution images to be used during the
+        training of the sharpener.
+
+    lowResFiles: list of strings
+        A list of file paths to low-resolution images to be used during the
+        training of the sharpener. There must be one low-resolution image
+        for each high-resolution image.
+
+    lowResQualityFiles: list of strings (optional, default: [])
+        A list of file paths to low-resolution quality images to be used to
+        mask out low-quality low-resolution pixels during training. If provided
+        there must be one quality image for each low-resolution image.
+
+    lowResGoodQualityFlags: list of integers (optional, default: [])
+        A list of values indicating which pixel values in the low-resolution
+        quality images should be considered as good quality.
+
+    cvHomogeneityThreshold: float (optional, default: 0.25)
+        A threshold of coeficient of variation below which high-resolution
+        pixels resampled to low-resolution are considered homogeneous and
+        usable during the training of the disaggregator.
+
+    movingWindowSize: integer (optional, default: 0)
+        The size of local regression moving window in low-resolution pixels. If
+        set to 0 then only global regression is performed.
+
+    disaggregatingTemperature: boolean (optional, default: False)
+        Flag indicating whether the parameter to be disaggregated is
+        temperature (e.g. land surface temperature). If that is the case then
+        at some points it needs to be converted into radiance. This is becasue
+        sensors measure energy, not temperature, plus radiance is the physical
+        measurements it makes sense to average, while radiometric temperature
+        behaviour is not linear.
+
+    regressionType: int (optional, default: 0)
+        Flag indicating whether scikit-neuralnetwork (flag value = REG_sknn_ann = 0)
+        or scikit-learn (flag value = REG_sklearn_ann = 1) implementations of
+        nearual network should be used. See
+        https://github.com/aigamedev/scikit-neuralnetwork and
+        http://scikit-learn.org/stable/modules/generated/sklearn.neural_network.MLPRegressor.html
+        for details.
+
+    regressorOpt: dictionary (optional, default: {})
+        Options to pass to neural network regressor constructor See links in
+        regressionType parameter description for details.
+
+    baggingRegressorOpt: dictionary (optional, default: {})
+        Options to pass to BaggingRegressor constructor. See
+        http://scikit-learn.org/stable/modules/generated/sklearn.ensemble.BaggingRegressor.html
+        for possibilities.
+
+
+    Returns
+    -------
+    None
+
+
+    References
+    ----------
+    .. [Gao2012] Gao, F., Kustas, W. P., & Anderson, M. C. (2012). A Data
+       Mining Approach for Sharpening Thermal Satellite Imagery over Land.
+       Remote Sensing, 4(11), 3287–3319. https://doi.org/10.3390/rs4113287
+    '''
+
+    def __init__(self,
+                 highResFiles,
+                 lowResFiles,
+                 lowResQualityFiles=[],
+                 lowResGoodQualityFlags=[],
+                 cvHomogeneityThreshold=0.25,
+                 movingWindowSize=0,
+                 perLeafLinearRegression=False,
+                 linearRegressionExtrapolationRatio=0.25,
+                 disaggregatingTemperature=False,
+                 regressorOpt={}):
+
+        super(RandomForestSharpener, self).__init__(highResFiles,
+                                                    lowResFiles,
+                                                    lowResQualityFiles,
+                                                    lowResGoodQualityFlags,
+                                                    cvHomogeneityThreshold,
+                                                    movingWindowSize,
+                                                    disaggregatingTemperature,
+                                                    perLeafLinearRegression,
+                                                    linearRegressionExtrapolationRatio,
+                                                    regressorOpt=regressorOpt,
+                                                    baggingRegressorOpt={})
+
+
+    def _doFit(self, goodData_LR, goodData_HR, weight, local):
+        ''' Private function. Fits the neural network.
+        '''
+
+        # Once all the samples have been picked build the regression using
+        # neural network approach
+        print('Fitting random forest')
+        if local:
+            self.regressorOpt["max_leaf_nodes"] = 10
+        else:
+            self.regressorOpt["max_leaf_nodes"] = 30
+
+        self.regressorOpt["min_samples_leaf"] = min(self.minimumSampleNumber, 10)
+        # If per leaf linear regression is used then use modified
+        # DecisionTreeRegressor. Otherwise use the standard one.
+        if self.perLeafLinearRegression:
+            reg = \
+                RandomForestRegressorWithLinearLeafRegression(self.linearRegressionExtrapolationRatio,
+                                                              self.regressorOpt)
+        else:
+            reg = \
+                ensemble.RandomForestRegressor(**self.regressorOpt)
+
+        reg = reg.fit(goodData_HR, np.ravel(goodData_LR), sample_weight=weight)
+        if data_HR.shape[0] <= 1:
+            reg.max_samples = 1.0
+
+        return reg
+
+
+    def _doPredict(self, inData, reg):
+        ''' Private function. Calls the Random Forest.
+        '''
+
+        origShape = inData.shape
+        if len(origShape) == 3:
+            bands = origShape[2]
+        else:
+            bands = 1
+
+        # Do the actual neural network regression
+        inData = inData.reshape((-1, bands))
+        outData = reg.predict(inData).reshape(-1, 1)
+        outData = outData.reshape((origShape[0], origShape[1]))
+
+        return outData
+
+
+class RandomForestRegressorWithLinearLeafRegression(ensemble.RandomForestRegressor):
+        ''' Decision tree regressor with added linear (bayesian ridge) regression
+        for all the data points falling within each decision tree leaf node.
+
+        Parameters
+        ----------
+        linearRegressionExtrapolationRatio: float (optional, default: 0.25)
+            A limit on extrapolation allowed in the per-leaf linear regressions.
+            The ratio is multiplied by the range of values present in each leaves'
+            training dataset and added (substracted) to the maxiumum (minimum)
+            value.
+
+        decisionTreeRegressorOpt: dictionary (optional, default: {})
+            Options to pass to DecisionTreeRegressor constructor. See
+            http://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeRegressor.html
+            for possibilities.
+
+        Returns
+        -------
+        None
+        '''
+
+        def __init__(self, linearRegressionExtrapolationRatio=0.25, randomForestRegressorOpt={}):
+            super(RandomForestRegressorWithLinearLeafRegression, self).__init__(**randomForestRegressorOpt)
+            self.randomForestRegressorOpt = randomForestRegressorOpt
+            self.leafParameters = {}
+            self.linearRegressionExtrapolationRatio = linearRegressionExtrapolationRatio
+
+        def fit(self, X, y, sample_weight, fitOpt={}):
+            ''' Build a decision tree regressor from the training set (X, y).
+
+            Parameters
+            ----------
+            X: array-like or sparse matrix, shape = [n_samples, n_features]
+                The training input samples. Internally, it will be converted to
+                dtype=np.float32 and if a sparse matrix is provided to a sparse
+                csc_matrix.
+
+            y: array-like, shape = [n_samples] or [n_samples, n_outputs]
+                The target values (real numbers). Use dtype=np.float64 and
+                order='C' for maximum efficiency.
+
+            sample_weight: array-like, shape = [n_samples] or None
+                Sample weights. If None, then samples are equally weighted. Splits
+                that would create child nodes with net zero or negative weight are
+                ignored while searching for a split in each node.
+
+            fitOpt: dictionary (optional, default: {})
+                Options to pass to DecisionTreeRegressor fit function. See
+                http://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeRegressor.html
+                for possibilities.
+
+            Returns
+            -------
+            Self
+            '''
+
+            # Fit a normal regression tree
+            super(RandomForestRegressorWithLinearLeafRegression, self).fit(X, y, sample_weight,
+                                                                           **fitOpt)
+
+            # Create a linear regression for all input points which fall into
+            # one output leaf
+            predictedValues = super(RandomForestRegressorWithLinearLeafRegression, self).predict(X)
+            valid = np.isfinite(predictedValues)
+            leafValues = np.unique(predictedValues[valid])
+
+            for value in leafValues:
+                ind = predictedValues == value
+                leafLinearRegrsion = linear_model.BayesianRidge()
+                leafLinearRegrsion.fit(X[ind, :], y[ind])
+                self.leafParameters[value] = {"linearRegression": leafLinearRegrsion,
+                                              "max": np.max(y[ind]),
+                                              "min": np.min(y[ind])}
+
+            return self
+
+        def predict(self, X, predictOpt={}):
+            ''' Predict class or regression value for X.
+
+            Parameters
+            ----------
+            X: array-like or sparse matrix of shape = [n_samples, n_features]
+                The input samples. Internally, it will be converted to
+                dtype=np.float32 and if a sparse matrix is provided to a sparse
+                csr_matrix.
+
+            predictOpt: dictionary (optional, default: {})
+                Options to pass to DecisionTreeRegressor predict function. See
+                http://scikit-learn.org/stable/modules/generated/sklearn.tree.DecisionTreeRegressor.html
+                for possibilities.
+
+            Returns
+            -------
+            y: array of shape = [n_samples] or [n_samples, n_outputs]
+                The predicted classes, or the predict values.
+            '''
+
+            # Do normal regression tree prediction
+            y = super(RandomForestRegressorWithLinearLeafRegression, self).predict(X, **predictOpt)
+
+            # And also apply per-leaf linear regression
+            for leafValue in self.leafParameters.keys():
+                ind = y == leafValue
+                if X[ind, :].size > 0:
+                    y[ind] = self.leafParameters[leafValue]["linearRegression"].predict(X[ind, :])
+                    # Limit extrapolation
+                    extrapolationRange = self.linearRegressionExtrapolationRatio * (
+                            self.leafParameters[leafValue]["max"] -
+                            self.leafParameters[leafValue]["min"])
+                    y[ind] = np.maximum(y[ind],
+                                        self.leafParameters[leafValue]["min"] - extrapolationRange)
+                    y[ind] = np.minimum(y[ind],
+                                        self.leafParameters[leafValue]["max"] + extrapolationRange)
+
+            return y
+
